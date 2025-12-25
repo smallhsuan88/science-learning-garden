@@ -10,37 +10,37 @@
 <body class="bg-slate-950 text-slate-100 min-h-screen">
   <div class="max-w-5xl mx-auto p-6">
 
-    <!-- ===== Header ===== -->
     <header class="mb-6">
       <h1 class="text-2xl font-semibold">🌱 Science Learning Garden</h1>
-      <p class="text-slate-300 mt-2">
-        GitHub Pages 前端 × Google Apps Script API × Google Sheet 題庫
-      </p>
+      <p class="text-slate-300 mt-2">GitHub Pages 前端 × Google Apps Script API × Google Sheet 題庫</p>
     </header>
 
-    <!-- ===== Controls ===== -->
     <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
-      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
-        <div>
+      <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
+        <div class="md:col-span-2">
           <label class="block text-sm text-slate-300 mb-1">使用者 ID</label>
           <input id="user_id" value="u001"
-            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
         </div>
+
         <div>
           <label class="block text-sm text-slate-300 mb-1">年級 (grade)</label>
           <input id="grade" placeholder="例如 3"
-            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
         </div>
+
         <div>
           <label class="block text-sm text-slate-300 mb-1">單元 (unit)</label>
           <input id="unit" placeholder="例如 植物的構造"
-            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
         </div>
+
         <div>
           <label class="block text-sm text-slate-300 mb-1">難度 (difficulty)</label>
           <input id="difficulty" placeholder="Normal"
-            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
         </div>
+
         <div class="flex items-end gap-2">
           <button id="btnPing"
             class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">
@@ -54,14 +54,15 @@
       </div>
 
       <div id="status" class="mt-3 text-sm text-slate-300"></div>
+      <div class="mt-2 text-xs text-slate-400 break-all">
+        API_BASE：<span id="apiBaseText"></span>
+      </div>
     </section>
 
-    <!-- ===== Quiz ===== -->
-    <section id="quiz"
-      class="hidden bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
-    </section>
+    <!-- Quiz -->
+    <section id="quiz" class="hidden bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6"></section>
 
-    <!-- ===== List ===== -->
+    <!-- List -->
     <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold">題目清單</h2>
@@ -69,54 +70,44 @@
       </div>
       <div id="list" class="mt-3 space-y-3"></div>
     </section>
-
   </div>
 
 <script>
 /* =========================================================
-   🔧 設定區（你只需要確認這裡）
+   ✅ 穩定入口：script.googleusercontent.com（不怕重新部署）
 ========================================================= */
-const API_BASE =
-  "https://script.google.com/macros/s/AKfycbxy9T33HfqvChKFR8gVfNhS5DLT9lXprWC5cXCcBmRh4vSLr0r9jWIMnSREkApQpzXG/exec";
-
-// 若後端 REQUIRE_KEY=true，填入同一串；否則留空 ""
-const API_KEY = "";
-
+const API_BASE = "https://script.googleusercontent.com/macros/echo?user_content_key=AehSKLgv-swuIEAMEZ4ObKa69POPZ1fUK7x-7M50kThZQZhwDk0pVda91HpmJg8_3sHPqJVzDC3RNsZ2zj6h60FsWTrNX-ColjjV1O6UcaWPVehK7QmvWWoXcPeO4dotZp8hFSv5tiQRsMSnWWOB-ylomHilrNrZgOQP_jr0DP5X5HZymnCQ1okmMMhMDjSQBHCyAG0B65MkjpWTb2DOjzVeGSRTa_uHCzuoJPsHdTBasg9NNUOgbz10_4NpIVjVRFRBYAUdfqNcJM0bOL4cySVgyH6C656RXQ&lib=MXyviE2JblIqahjsM4_azJF8SLOz3GMtV";
 /* ========================================================= */
 
 const $ = (id) => document.getElementById(id);
+$("apiBaseText").textContent = API_BASE;
+
 let questions = [];
 let current = null;
 
 function setStatus(msg, isError=false) {
   $("status").textContent = msg;
-  $("status").className =
-    "mt-3 text-sm " + (isError ? "text-rose-300" : "text-slate-300");
+  $("status").className = "mt-3 text-sm " + (isError ? "text-rose-300" : "text-slate-300");
 }
 
 async function apiGet(params) {
   const url = new URL(API_BASE);
   Object.entries(params).forEach(([k,v]) => {
-    if (v !== "" && v !== undefined && v !== null)
-      url.searchParams.set(k, v);
+    if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
   });
-  if (API_KEY) url.searchParams.set("key", API_KEY);
-
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { method: "GET" });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error || "API error");
   return json;
 }
 
-async function apiSubmitAnswer(payload) {
+async function apiPost(action, payload) {
   const url = new URL(API_BASE);
-  url.searchParams.set("action", "submitAnswer");
-  if (API_KEY) url.searchParams.set("key", API_KEY);
-
+  url.searchParams.set("action", action);
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload || {})
   });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error || "API error");
@@ -127,88 +118,90 @@ function pickOne() {
   return questions[Math.floor(Math.random() * questions.length)];
 }
 
+function renderList(items) {
+  $("list").innerHTML = "";
+  $("count").textContent = `共 ${items.length} 題（目前顯示）`;
+
+  items.forEach(q => {
+    const card = document.createElement("div");
+    card.className = "p-4 border border-slate-800 rounded bg-slate-950/40";
+    card.innerHTML = `
+      <div class="font-semibold">${escapeHtml(q.stem || "")}</div>
+      <div class="text-sm text-slate-300 mt-1">
+        年級 ${escapeHtml(String(q.grade ?? ""))}｜${escapeHtml(q.unit || "")}｜${escapeHtml(q.difficulty || "")}
+      </div>
+      <button class="mt-2 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+        作答
+      </button>
+    `;
+    card.querySelector("button").onclick = () => renderQuiz(q);
+    $("list").appendChild(card);
+  });
+}
+
 function renderQuiz(q) {
   current = q;
   const quiz = $("quiz");
   quiz.classList.remove("hidden");
 
-  const options = String(q.options).split(",").map(s=>s.trim());
+  const opts = String(q.options || "").split(",").map(s => s.trim()).filter(Boolean);
+  const optHtml = opts.map((op, i) => `
+    <label class="flex gap-2 p-2 border border-slate-800 rounded cursor-pointer">
+      <input type="radio" name="opt" value="${i}">
+      <span>${escapeHtml(op)}</span>
+    </label>
+  `).join("");
 
   quiz.innerHTML = `
-    <div class="text-xl font-semibold mb-3">${q.stem}</div>
-    <div class="space-y-2">
-      ${options.map((op,i)=>`
-        <label class="flex gap-2 p-2 border border-slate-800 rounded cursor-pointer">
-          <input type="radio" name="opt" value="${i}" />
-          <span>${op}</span>
-        </label>`).join("")}
-    </div>
+    <div class="text-xl font-semibold mb-3">${escapeHtml(q.stem || "")}</div>
+    <div class="space-y-2">${optHtml || `<div class="text-slate-300">此題 options 欄位是空的</div>`}</div>
+
     <div class="mt-3 flex gap-2">
-      <button id="submit"
-        class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500">
-        送出
-      </button>
-      <button id="next"
-        class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">
-        換一題
-      </button>
+      <button id="submit" class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500">送出</button>
+      <button id="next" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">換一題</button>
     </div>
+
     <div id="result" class="mt-3 text-sm"></div>
+
     <details class="mt-3">
       <summary class="cursor-pointer text-slate-300">解析</summary>
-      <div class="mt-2 text-slate-200">${q.explanation || ""}</div>
+      <div class="mt-2 text-slate-200">${escapeHtml(q.explanation || "")}</div>
     </details>
   `;
 
-  $("next").onclick = () => renderQuiz(pickOne());
+  $("next").onclick = () => {
+    if (!questions.length) return;
+    renderQuiz(pickOne());
+  };
 
   $("submit").onclick = async () => {
-    const picked = quiz.querySelector("input[name=opt]:checked");
-    if (!picked) {
-      $("result").textContent = "請選擇答案";
-      return;
-    }
+    const picked = quiz.querySelector('input[name="opt"]:checked');
+    if (!picked) return ($("result").textContent = "請先選一個答案");
+
     try {
-      const res = await apiSubmitAnswer({
-        user_id: $("user_id").value,
+      $("result").textContent = "送出中…";
+
+      // 你後端若 action 名稱不同，把 "submitAnswer" 改成你的
+      const r = await apiPost("submitAnswer", {
+        user_id: $("user_id").value.trim(),
         q_id: q.question_id,
-        chosen_answer: picked.value
+        chosen_answer: Number(picked.value)
       });
-      $("result").textContent =
-        res.is_correct ? "✅ 答對了！" : "❌ 答錯了";
+
+      // 你後端回傳欄位若不同，這裡可調整
+      const ok = !!r.is_correct;
+      $("result").textContent = ok ? "✅ 答對了！" : "❌ 答錯了！";
     } catch (e) {
       $("result").textContent = "送出失敗：" + e.message;
     }
   };
 }
 
-function renderList(items) {
-  $("list").innerHTML = "";
-  $("count").textContent = `共 ${items.length} 題`;
-
-  items.forEach(q => {
-    const card = document.createElement("div");
-    card.className =
-      "p-4 border border-slate-800 rounded bg-slate-950/40";
-    card.innerHTML = `
-      <div class="font-semibold">${q.stem}</div>
-      <div class="text-sm text-slate-300 mt-1">
-        年級 ${q.grade}｜${q.unit}｜${q.difficulty}
-      </div>
-      <button class="mt-2 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-        作答
-      </button>`;
-    card.querySelector("button").onclick = () => renderQuiz(q);
-    $("list").appendChild(card);
-  });
-}
-
-/* ===== Buttons ===== */
-
 $("btnPing").onclick = async () => {
   try {
-    const r = await apiGet({ action:"ping" });
-    setStatus("API OK：" + r.message);
+    setStatus("Ping 中…");
+    const r = await apiGet({ action: "ping" });
+    setStatus(`API OK：${r.message}（${r.ts}）`);
   } catch (e) {
     setStatus("Ping 失敗：" + e.message, true);
   }
@@ -219,19 +212,31 @@ $("btnLoad").onclick = async () => {
     setStatus("載入中…");
     const r = await apiGet({
       action: "getQuestions",
-      grade: $("grade").value,
-      unit: $("unit").value,
-      difficulty: $("difficulty").value,
+      grade: $("grade").value.trim(),
+      unit: $("unit").value.trim(),
+      difficulty: $("difficulty").value.trim(),
       limit: 100
     });
-    questions = r.data;
+
+    questions = Array.isArray(r.data) ? r.data : [];
     renderList(questions);
-    renderQuiz(pickOne());
-    setStatus(`載入成功，共 ${r.count} 題`);
+
+    if (questions.length) renderQuiz(pickOne());
+    setStatus(`載入成功：共 ${r.count ?? questions.length} 題`);
   } catch (e) {
     setStatus("載入失敗：" + e.message, true);
   }
 };
+
+// 防 XSS：把題目文字安全輸出
+function escapeHtml(s){
+  return String(s)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
 </script>
 </body>
 </html>
