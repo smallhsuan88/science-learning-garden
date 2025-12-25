@@ -115,18 +115,19 @@
 
 <script>
 /* =========================================================
-   ✅ 你只需要改這一行：最新部署的 exec URL
+   ✅ 設定 API 入口：先 googleusercontent、再 exec 備援
 ========================================================= */
-const EXEC_URL = "https://script.google.com/macros/s/AKfycbyouH4rIopFTOQIPcoKosIFIwwd3wi9kvernE3D7lVWuFZp8BCoG8bC6fwIrsFUEVAF/exec";
+const API_GOOGLEUSERCONTENT_BASE = "";
+const API_EXEC_FALLBACK = "https://script.google.com/macros/s/AKfycbyouH4rIopFTOQIPcoKosIFIwwd3wi9kvernE3D7lVWuFZp8BCoG8bC6fwIrsFUEVAF/exec";
 /* ========================================================= */
 
 const LS_KEY = "SLG_API_BASE_STABLE_V1";
 
 const $ = (id) => document.getElementById(id);
 
-$("execText").textContent = EXEC_URL;
+$("execText").textContent = API_EXEC_FALLBACK;
 
-let API_BASE = "";        // 會自動取得穩定入口（googleusercontent）
+let API_BASE = API_GOOGLEUSERCONTENT_BASE || "";        // 會自動取得穩定入口（googleusercontent）
 let questions = [];
 const debugState = {
   sanitizedQuery: "（尚未送出查詢）",
@@ -147,7 +148,7 @@ function formatError(err) {
 }
 
 function setApiBaseText() {
-  $("apiBaseText").textContent = API_BASE || "（尚未取得）";
+  $("apiBaseText").textContent = API_BASE || API_GOOGLEUSERCONTENT_BASE || "（尚未取得）";
 }
 
 function updateDebugDisplay(overrides = {}) {
@@ -188,6 +189,18 @@ function sanitizeDifficulty(input) {
 }
 
 async function ensureStableBase({ force = false } = {}) {
+  if (!force && API_BASE && API_BASE.startsWith("https://script.googleusercontent.com/")) {
+    setApiBaseText();
+    return API_BASE;
+  }
+
+  if (!force && API_GOOGLEUSERCONTENT_BASE) {
+    API_BASE = API_GOOGLEUSERCONTENT_BASE;
+    localStorage.setItem(LS_KEY, API_BASE);
+    setApiBaseText();
+    return API_BASE;
+  }
+
   if (!force) {
     const cached = localStorage.getItem(LS_KEY);
     if (cached && cached.startsWith("https://script.googleusercontent.com/")) {
@@ -199,7 +212,7 @@ async function ensureStableBase({ force = false } = {}) {
 
   // 透過 redirect 自動抓到 googleusercontent 的最終 URL
   setStatus("取得穩定入口中…");
-  const url = new URL(EXEC_URL);
+  const url = new URL(API_EXEC_FALLBACK);
   url.searchParams.set("action", "ping");
   url.searchParams.set("_", String(Date.now())); // 防 cache
 
@@ -207,31 +220,32 @@ async function ensureStableBase({ force = false } = {}) {
   try {
     res = await fetch(url.toString(), { method: "GET", redirect: "follow" });
   } catch (e) {
-    throw new Error("無法連線到 EXEC_URL（請確認部署為『誰都可存取』）： " + e.message);
+    throw new Error("無法連線到 API_EXEC_FALLBACK（請確認部署為『誰都可存取』）： " + e.message);
   }
 
   // fetch 追完 redirect 後，res.url 就會是 googleusercontent 的穩定入口
-  const finalUrl = res.url;
-  if (!finalUrl || !finalUrl.startsWith("https://script.googleusercontent.com/")) {
-    // 有些情況可能不會 redirect（但至少還能用 exec）
-    API_BASE = EXEC_URL;
+  const finalUrl = res.url || "";
+  if (finalUrl.startsWith("https://script.googleusercontent.com/")) {
+    // ✅ 用 finalUrl 當 API_BASE，但要把 query 清乾淨，只留 base
+    API_BASE = finalUrl.split("?")[0] + "?" + (finalUrl.split("?")[1] ? finalUrl.split("?")[1].split("&").filter(s => s.startsWith("user_content_key=") || s.startsWith("lib=")).join("&") : "");
     localStorage.setItem(LS_KEY, API_BASE);
     setApiBaseText();
-    setStatus("⚠️ 未取得 googleusercontent，暫用 exec 直連（仍可運作）");
+    setStatus("✅ 已取得穩定入口");
     return API_BASE;
   }
 
-  // ✅ 用 finalUrl 當 API_BASE，但要把 query 清乾淨，只留 base
-  // finalUrl 可能已經帶 action=ping 等參數，我們只取 origin+path+search 中的必要基底
-  // 最保險做法：用 finalUrl 當 base，後續用 URL() 再 append action/params。
-  API_BASE = finalUrl.split("?")[0] + "?" + (finalUrl.split("?")[1] ? finalUrl.split("?")[1].split("&").filter(s => s.startsWith("user_content_key=") || s.startsWith("lib=")).join("&") : "");
-  localStorage.setItem(LS_KEY, API_BASE);
+  // 未取得 googleusercontent：維持 google 入口為空，後續呼叫會改用 exec 備援
+  API_BASE = "";
   setApiBaseText();
-  setStatus("✅ 已取得穩定入口");
+  setStatus("⚠️ 未取得 googleusercontent，後續將改用 exec 備援", true);
   return API_BASE;
 }
 
 async function callApiWithBase(base, { method = "GET", action, query = {}, payload } = {}) {
+  if (!base) {
+    throw new Error("缺少 API base URL");
+  }
+
   const url = new URL(base);
   if (action) url.searchParams.set("action", action);
 
@@ -285,17 +299,29 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
 }
 
 async function callApi(args) {
-  // 先確保有 API_BASE
+  const { skipExecFallback = false, ...rest } = args || {};
+
+  // 先確保有 API_BASE（googleusercontent），若沒有會在需要時使用 exec 備援
   if (!API_BASE) await ensureStableBase();
 
-  // 先打穩定入口
-  try {
-    return await callApiWithBase(API_BASE, args);
-  } catch (e) {
-    // 穩定入口掛了就直接改用 exec
-    setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
-    return await callApiWithBase(EXEC_URL, args);
+  const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE;
+  let primaryError = primaryBase ? null : new Error("尚未設定 googleusercontent 入口");
+
+  if (primaryBase) {
+    try {
+      return await callApiWithBase(primaryBase, rest);
+    } catch (e) {
+      primaryError = e;
+    }
   }
+
+  if (skipExecFallback) {
+    if (primaryError) throw primaryError;
+    throw new Error("無法取得 googleusercontent 入口，請稍後再試");
+  }
+
+  setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(primaryError), true);
+  return await callApiWithBase(API_EXEC_FALLBACK, rest);
 }
 
 function firstArrayCandidate(obj, paths) {
@@ -439,23 +465,44 @@ function renderQuiz(q) {
       return;
     }
 
-    try {
-      $("result").textContent = "送出中…";
+    const chosenIdx = Number(picked.value);
+    const localCorrect = chosenIdx === Number(q.answer_key);
+    const baseMessage = localCorrect ? "✅ 答對了！" : "❌ 答錯了！";
+    const resultEl = $("result");
+    resultEl.innerHTML = `<div class="font-semibold">${baseMessage}</div>`;
 
-      const r = await callApi({
-        method: "POST",
-        action: "submitAnswer",
-        payload: {
-          user_id: $("user_id").value.trim(),
-          q_id: q.question_id,
-          chosen_answer: Number(picked.value),
-        },
+    const detail = quiz.querySelector("details");
+    if (!localCorrect && detail) {
+      detail.open = true;
+    }
+
+    const submissionQuery = {
+      action: "submitAnswer",
+      user_id: $("user_id").value.trim(),
+      q_id: q.question_id,
+      chosen_answer: chosenIdx,
+      _: Date.now(),
+    };
+    updateDebugDisplay({ sanitizedQuery: JSON.stringify(submissionQuery, null, 2), parsedCount: "（尚未解析）" });
+
+    const recordStatus = document.createElement("div");
+    recordStatus.className = "text-xs text-slate-300 mt-1";
+    recordStatus.textContent = "背景紀錄中…";
+    resultEl.appendChild(recordStatus);
+
+    try {
+      await callApi({
+        method: "GET",
+        query: submissionQuery,
+        skipExecFallback: true,
       });
 
-      const ok = !!(r.is_correct ?? r.correct ?? r.ok);
-      $("result").textContent = ok ? "✅ 答對了！" : "❌ 答錯了！";
+      recordStatus.textContent = "已記錄";
+      recordStatus.className = "text-xs text-emerald-300 mt-1";
     } catch (e) {
-      $("result").textContent = "送出失敗：" + formatError(e);
+      const hint = formatError(e);
+      recordStatus.textContent = `未記錄（不影響測驗）。請重新整理或換網路再試。${hint ? " 詳細：" + hint : ""}`;
+      recordStatus.className = "text-xs text-amber-300 mt-1";
     }
   };
 }
@@ -500,13 +547,25 @@ $("btnLoad").onclick = async () => {
 
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
 
-    // 先用穩定入口打
-    const r1 = await callApiWithBase(API_BASE, { method: "GET", query });
+    // 先用 googleusercontent 打，失敗再 fallback exec
+    const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE || API_EXEC_FALLBACK;
+    let r1;
+    let usedExecAsPrimary = primaryBase === API_EXEC_FALLBACK;
+
+    try {
+      r1 = await callApiWithBase(primaryBase, { method: "GET", query });
+    } catch (e) {
+      if (usedExecAsPrimary) throw e;
+      setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
+      r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
+      usedExecAsPrimary = true;
+    }
+
     const parsed1 = normalizeQuestionList(r1);
 
     // ✅ 若沒填篩選條件，但回來 0 題 → 高機率穩定入口指到舊部署，改用 exec 再打一次
-    if (noFiltersApplied(filters) && parsed1.count === 0) {
-      const r2 = await callApiWithBase(EXEC_URL, { method: "GET", query });
+    if (noFiltersApplied(filters) && parsed1.count === 0 && !usedExecAsPrimary) {
+      const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
       const parsed2 = normalizeQuestionList(r2);
 
       if (parsed2.count > 0) {
@@ -535,7 +594,7 @@ $("btnLoadAll").onclick = async () => {
     setStatus("載入全部中…");
     const query = { action: "getQuestions", limit: 100, _: Date.now() };
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
-    const r = await callApiWithBase(EXEC_URL, { method: "GET", query });
+    const r = await callApi({ method: "GET", query });
     const parsed = normalizeQuestionList(r);
     questions = parsed.items;
     renderList(questions);
@@ -558,7 +617,7 @@ $("btnRefreshStable").onclick = async () => {
 
 $("btnClearCache").onclick = () => {
   localStorage.removeItem(LS_KEY);
-  API_BASE = "";
+  API_BASE = API_GOOGLEUSERCONTENT_BASE || "";
   setApiBaseText();
   setStatus("已清除 API 快取（請按 Ping 或重新取得穩定入口）");
 };
