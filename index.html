@@ -58,6 +58,10 @@
           class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">
           清除 API 快取
         </button>
+        <button id="btnRefreshApi"
+          class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">
+          重新取得穩定入口
+        </button>
         <div id="status" class="text-sm text-slate-300"></div>
       </div>
 
@@ -92,34 +96,53 @@
 // 你重新部署後只需要改這一行（exec 會變）
 const FALLBACK_EXEC = "https://script.google.com/macros/s/AKfycbyouH4rIopFTOQIPcoKosIFIwwd3wi9kvernE3D7lVWuFZp8BCoG8bC6fwIrsFUEVAF/exec";
 
-// localStorage 快取 key
-const API_CACHE_KEY = "SLG_API_BASE_V1";
+// localStorage 快取 key（僅記錄 googleusercontent base）
+const LS_KEY = "SLG_API_BASE_GOOGLEUSERCONTENT";
+
+let API_BASE = "";
+let backendCount = 0;
 
 /**
  * 解析 exec → 自動 follow redirect → 取得 googleusercontent echo 穩定入口
  * 並存到 localStorage，後續 callApi 直接用穩定入口，不再依賴 exec。
  */
-async function resolveApiBase() {
-  const cached = localStorage.getItem(API_CACHE_KEY);
+async function refreshStableApiBase() {
+  const res = await fetch(`${FALLBACK_EXEC}?action=ping`, { redirect: "follow" });
+  const finalUrl = res.url || "";
+  if (finalUrl.includes("script.googleusercontent.com")) {
+    API_BASE = finalUrl;
+    localStorage.setItem(LS_KEY, API_BASE);
+    $("apiBaseText").textContent = API_BASE;
+    return API_BASE;
+  }
+  throw new Error("解析穩定入口失敗，未取得 googleusercontent 位置");
+}
+
+function loadApiBaseFromCache() {
+  const cached = localStorage.getItem(LS_KEY);
+  if (cached && cached.includes("script.googleusercontent.com")) {
+    API_BASE = cached;
+    $("apiBaseText").textContent = API_BASE;
+    return API_BASE;
+  }
+  return "";
+}
+
+async function ensureApiBase() {
+  if (API_BASE) return API_BASE;
+  const cached = loadApiBaseFromCache();
   if (cached) return cached;
-
-  // 用 ping 觸發 redirect（跟到 googleusercontent）
-  const r = await fetch(`${FALLBACK_EXEC}?action=ping`, { method: "GET", redirect: "follow" });
-
-  // r.url 會是最後落地的 echo URL（含 user_content_key/lib）
-  const finalUrl = r.url;
-
-  const u = new URL(finalUrl);
-  // 移除 action=ping，避免 base 帶著 ping
-  u.searchParams.delete("action");
-
-  const stableBase = u.toString();
-  localStorage.setItem(API_CACHE_KEY, stableBase);
-  return stableBase;
+  try {
+    return await refreshStableApiBase();
+  } catch (e) {
+    // 讓上層決定如何處理
+    throw e;
+  }
 }
 
 function clearApiCache() {
-  localStorage.removeItem(API_CACHE_KEY);
+  localStorage.removeItem(LS_KEY);
+  API_BASE = "";
 }
 
 const $ = (id) => document.getElementById(id);
@@ -127,9 +150,8 @@ const $ = (id) => document.getElementById(id);
 $("execText").textContent = FALLBACK_EXEC;
 $("apiBaseText").textContent = "（尚未解析，請先按 Ping API 或 載入題目）";
 
-resolveApiBase()
-  .then((base) => { $("apiBaseText").textContent = base; })
-  .catch(() => { /* 沒關係，等使用者按 ping 再解析 */ });
+loadApiBaseFromCache();
+ensureApiBase().catch(() => { /* 等手動 refresh */ });
 
 let questions = [];
 
@@ -144,26 +166,29 @@ function formatError(err) {
   return err.message || String(err);
 }
 
-async function callApi({ method = "GET", action, query = {}, payload } = {}) {
-  // ✅ 每次呼叫前確保拿到穩定入口
-  const API_BASE = await resolveApiBase();
-  $("apiBaseText").textContent = API_BASE;
-
+function buildUrl(action, query = {}) {
+  if (!API_BASE) throw new Error("尚未取得 API_BASE");
   const url = new URL(API_BASE);
   if (action) url.searchParams.set("action", action);
   Object.entries(query).forEach(([k, v]) => {
-    if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
+    if (v !== undefined && v !== null) url.searchParams.set(k, v);
   });
+  return url.toString();
+}
 
+async function doFetchOnce({ method, action, query, payload }) {
+  const url = buildUrl(action, query);
   let res;
   try {
-    res = await fetch(url.toString(), {
+    res = await fetch(url, {
       method,
       headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
       body: method === "POST" ? JSON.stringify(payload || {}) : undefined,
     });
   } catch (e) {
-    throw new Error("無法連線到 API，請檢查網路或 Web App 權限（" + e.message + "）");
+    const err = new Error("無法連線到 API：" + e.message);
+    err.httpStatus = "";
+    throw err;
   }
 
   const text = await res.text();
@@ -191,6 +216,29 @@ async function callApi({ method = "GET", action, query = {}, payload } = {}) {
     throw err;
   }
   return json;
+}
+
+async function callApi({ method = "GET", action, query = {}, payload } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await ensureApiBase();
+      $("apiBaseText").textContent = API_BASE || $("apiBaseText").textContent;
+      return await doFetchOnce({ method, action, query, payload });
+    } catch (e) {
+      lastErr = e;
+      if (attempt === 0) {
+        try {
+          await refreshStableApiBase();
+          continue;
+        } catch {
+          // 如果 refresh 也失敗就直接跳出
+        }
+      }
+      break;
+    }
+  }
+  throw lastErr || new Error("API 呼叫失敗");
 }
 
 function firstArrayCandidate(obj, paths) {
@@ -257,11 +305,14 @@ function pickOne() {
   return questions[Math.floor(Math.random() * questions.length)];
 }
 
-function renderList(items) {
+function renderList(items, totalCount = 0) {
   $("list").innerHTML = "";
-  $("count").textContent = items.length
-    ? `共 ${items.length} 題（目前顯示）`
-    : "目前沒有符合條件的題目";
+  if (items.length) {
+    const backendText = totalCount ? `後端共 ${totalCount} 題｜` : "";
+    $("count").textContent = `${backendText}目前顯示 ${items.length} 題`;
+  } else {
+    $("count").textContent = "目前沒有符合條件的題目";
+  }
 
   if (!items.length) {
     const empty = document.createElement("div");
@@ -362,7 +413,7 @@ function renderQuiz(q) {
 $("btnPing").onclick = async () => {
   try {
     setStatus("Ping 中…");
-    const r = await callApi({ method: "GET", query: { action: "ping" } });
+    const r = await callApi({ method: "GET", action: "ping" });
     const msg = r.message || r.status || "pong";
     const ts = r.ts ? `（${r.ts}）` : "";
     setStatus(`API OK：${msg}${ts}`);
@@ -378,8 +429,8 @@ $("btnLoad").onclick = async () => {
     // ✅ 提醒：你題庫 difficulty 多為 Easy，預設 placeholder 只是示意
     const r = await callApi({
       method: "GET",
+      action: "getQuestions",
       query: {
-        action: "getQuestions",
         grade: $("grade").value.trim(),
         unit: $("unit").value.trim(),
         difficulty: $("difficulty").value.trim(),
@@ -389,13 +440,15 @@ $("btnLoad").onclick = async () => {
 
     const parsed = normalizeQuestionList(r);
     questions = parsed.items;
-    renderList(questions);
+    backendCount = parsed.count ?? questions.length;
+    renderList(questions, backendCount);
 
     if (questions.length) renderQuiz(pickOne());
-    setStatus(`載入成功：共 ${parsed.count} 題（顯示 ${questions.length} 題）`);
+    setStatus(`載入成功：後端回傳 ${backendCount} 題，前端顯示 ${questions.length} 題`);
   } catch (e) {
     setStatus("載入失敗：" + formatError(e), true);
-    renderList([]);
+    backendCount = 0;
+    renderList([], backendCount);
   }
 };
 
@@ -403,6 +456,16 @@ $("btnClearApi").onclick = () => {
   clearApiCache();
   $("apiBaseText").textContent = "（已清除快取，請按 Ping API 重新解析）";
   setStatus("已清除 API 快取。下一次 Ping / 載入題目會重新解析穩定入口。");
+};
+
+$("btnRefreshApi").onclick = async () => {
+  try {
+    setStatus("重新解析穩定入口中…");
+    await refreshStableApiBase();
+    setStatus("已重新取得穩定入口");
+  } catch (e) {
+    setStatus("重新取得穩定入口失敗：" + formatError(e), true);
+  }
 };
 
 // 防 XSS：把題目文字安全輸出
