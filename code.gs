@@ -35,6 +35,89 @@ const REQUIRED_COLS = {
   Mistakes: ["user_id", "q_id", "strike", "last_date"]
 };
 
+/**
+ * 確保指定 sheet 存在且包含必要欄位。會在缺少時自動補上 header。
+ */
+function ensureSheetReady_(sheetName) {
+  const ss = ss_();
+  let sh = ss.getSheetByName(sheetName);
+  const required = REQUIRED_COLS[sheetName] || [];
+  let created = false;
+
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+    created = true;
+    if (required.length) sh.getRange(1, 1, 1, required.length).setValues([required]);
+  }
+
+  let info;
+  try {
+    info = readSheetAsObjects2_(sheetName);
+  } catch (err) {
+    if (required.length) {
+      sh.getRange(1, 1, 1, required.length).setValues([required]);
+      info = readSheetAsObjects2_(sheetName);
+    } else {
+      throw err;
+    }
+  }
+
+  let meta = info.meta || {};
+  let headers = meta.headers || [];
+  let headerRow = meta.headerRow || 1;
+
+  // 若找不到 header，但有 required，就直接建立 header
+  if ((meta.reason === "header_not_found" || headers.length === 0) && required.length) {
+    sh.getRange(1, 1, 1, required.length).setValues([required]);
+    info = readSheetAsObjects2_(sheetName);
+    meta = info.meta || {};
+    headers = meta.headers || required.slice();
+    headerRow = meta.headerRow || 1;
+  }
+
+  const missing = required.filter(h => headers.indexOf(h) === -1);
+  if (missing.length) {
+    const updatedHeaders = headers.concat(missing);
+    const headerRange = sh.getRange(headerRow, 1, 1, updatedHeaders.length);
+    const rowValues = headerRange.getValues()[0];
+    missing.forEach((h, i) => {
+      rowValues[headers.length + i] = h;
+    });
+    headerRange.setValues([rowValues]);
+    info = readSheetAsObjects2_(sheetName);
+    meta = info.meta || meta;
+  }
+
+  return { sheet: sh, meta: info.meta || meta, missing, created };
+}
+
+/**
+ * 只檢查，不修改：用於 diagnose 回傳各表狀態。
+ */
+function inspectSheet_(sheetName) {
+  const ss = ss_();
+  const sh = ss.getSheetByName(sheetName);
+  const required = REQUIRED_COLS[sheetName] || [];
+  if (!sh) {
+    return { exists: false, headers: [], missing: required.slice(), headerRow: null, lastRow: 0 };
+  }
+
+  try {
+    const { meta } = readSheetAsObjects2_(sheetName);
+    const headers = meta?.headers || [];
+    const missing = required.filter(h => headers.indexOf(h) === -1);
+    return {
+      exists: true,
+      headers,
+      missing,
+      headerRow: meta?.headerRow || null,
+      lastRow: meta?.lastRow || sh.getLastRow()
+    };
+  } catch (err) {
+    return { exists: true, headers: [], missing: required.slice(), error: String(err) };
+  }
+}
+
 function doGet(e) {
   return handle_(e, "GET");
 }
@@ -113,6 +196,11 @@ function handle_(e, method) {
 
       if (!user_id || !q_id) return json_({ ok: false, error: "Missing user_id or q_id" });
 
+      // 確保三張表存在且 header 完整
+      const logsReady = ensureSheetReady_(SHEETS.Logs);
+      const masteryReady = ensureSheetReady_(SHEETS.Mastery);
+      const mistakesReady = ensureSheetReady_(SHEETS.Mistakes);
+
       // Determine correct or not:
       let is_correct;
       if (body.is_correct !== undefined || p.is_correct !== undefined) {
@@ -128,6 +216,16 @@ function handle_(e, method) {
       }
 
       const logTimestamp = new Date().toISOString();
+
+      if (logsReady.missing.length) {
+        return json_({ ok: false, error: `Logs 缺少欄位：${logsReady.missing.join(",")}`, missing: logsReady.missing, sheet: SHEETS.Logs, spreadsheet_id: SPREADSHEET_ID });
+      }
+      if (masteryReady.missing.length) {
+        return json_({ ok: false, error: `Mastery 缺少欄位：${masteryReady.missing.join(",")}`, missing: masteryReady.missing, sheet: SHEETS.Mastery, spreadsheet_id: SPREADSHEET_ID });
+      }
+      if (mistakesReady.missing.length) {
+        return json_({ ok: false, error: `Mistakes 缺少欄位：${mistakesReady.missing.join(",")}`, missing: mistakesReady.missing, sheet: SHEETS.Mistakes, spreadsheet_id: SPREADSHEET_ID });
+      }
 
       // 1) append Logs
       const logRange = appendRow_(SHEETS.Logs, {
@@ -161,8 +259,35 @@ function handle_(e, method) {
         logs_total: logsTotal,
         sheet_last_row: logsInfo.meta?.lastRow || logRow,
         spreadsheet_id: SPREADSHEET_ID,
+        written_to_spreadsheet_id: SPREADSHEET_ID,
         mastery_updated: Boolean(masteryUpdated),
-        mistakes_updated: Boolean(mistakesUpdated)
+        mistakes_updated: Boolean(mistakesUpdated),
+        log_written: true,
+        server_ts: logTimestamp,
+        explanation: (getQuestionById_(q_id) || {}).explanation || "",
+        updated_sheets: {
+          logs: { missing: logsReady.missing, created: logsReady.created },
+          mastery: { missing: masteryReady.missing, created: masteryReady.created },
+          mistakes: { missing: mistakesReady.missing, created: mistakesReady.created }
+        }
+      });
+    }
+
+    if (action === "diagnose") {
+      const targets = [SHEETS.Logs, SHEETS.Mastery, SHEETS.Mistakes];
+      const status = {};
+      targets.forEach(name => {
+        status[name] = inspectSheet_(name);
+      });
+
+      return json_({
+        ok: true,
+        spreadsheet_id: SPREADSHEET_ID,
+        sheets: status,
+        missing: Object.entries(status).reduce((acc, [k, v]) => {
+          if (v.missing && v.missing.length) acc[k] = v.missing;
+          return acc;
+        }, {})
       });
     }
 
@@ -171,6 +296,8 @@ function handle_(e, method) {
       if (!user_id) return json_({ ok: false, error: "Missing user_id" });
 
       const user = getOrCreateUser_(user_id, p.nickname ? String(p.nickname) : "");
+      ensureSheetReady_(SHEETS.Mastery);
+      ensureSheetReady_(SHEETS.Mistakes);
       const mastery = readSheetAsObjects2_(SHEETS.Mastery).rows.filter(r => String(r.user_id) === user_id);
       const mistakes = readSheetAsObjects2_(SHEETS.Mistakes).rows.filter(r => String(r.user_id) === user_id);
 
@@ -180,6 +307,10 @@ function handle_(e, method) {
     if (action === "getUserProgress") {
       const user_id = String(p.user_id || "").trim();
       if (!user_id) return json_({ ok: false, error: "Missing user_id" });
+
+      ensureSheetReady_(SHEETS.Logs);
+      ensureSheetReady_(SHEETS.Mastery);
+      ensureSheetReady_(SHEETS.Mistakes);
 
       const logsData = readSheetAsObjects2_(SHEETS.Logs);
       const masteryData = readSheetAsObjects2_(SHEETS.Mastery);
@@ -305,11 +436,8 @@ function readSheetAsObjects_(sheetName) {
 }
 
 function appendRow_(sheetName, obj) {
-  const sh = ss_().getSheetByName(sheetName);
+  const { sheet: sh, meta } = ensureSheetReady_(sheetName);
   if (!sh) throw new Error(`Sheet not found: ${sheetName}`);
-
-  // ✅ 一樣改成：先定位 header 列（避免 header 不在第 1 列）
-  const { meta } = readSheetAsObjects2_(sheetName);
   if (!meta || !meta.headers || !meta.headerRow) {
     throw new Error(`Cannot appendRow: header not found in ${sheetName}`);
   }
