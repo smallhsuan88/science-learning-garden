@@ -51,6 +51,10 @@
             class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-medium">
             載入題目
           </button>
+          <button id="btnLoadAll"
+            class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 font-medium text-slate-900">
+            載入全部（忽略篩選）
+          </button>
         </div>
       </div>
 
@@ -71,6 +75,28 @@
         <div>API_BASE（實際呼叫用）：<span id="apiBaseText"></span></div>
         <div>FALLBACK_EXEC（備援）：<span id="execText"></span></div>
         <div>最近一次請求：<span id="lastReq"></span></div>
+      </div>
+    </section>
+
+    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
+      <h2 class="text-lg font-semibold mb-2">Debug</h2>
+      <div class="text-xs text-slate-300 space-y-2">
+        <div>
+          <div class="font-medium text-slate-200">Sanitized Query</div>
+          <pre id="debugQuery" class="mt-1 whitespace-pre-wrap break-words bg-slate-950/60 rounded p-2 border border-slate-800 text-slate-300">（尚未送出查詢）</pre>
+        </div>
+        <div>
+          <div class="font-medium text-slate-200">lastRequestUrl</div>
+          <div id="debugLastRequestUrl" class="mt-1 break-all text-slate-400">（尚未送出請求）</div>
+        </div>
+        <div>
+          <div class="font-medium text-slate-200">rawResponsePreview（前 300 字）</div>
+          <pre id="debugRaw" class="mt-1 whitespace-pre-wrap break-words bg-slate-950/60 rounded p-2 border border-slate-800 text-slate-300">（尚未送出請求）</pre>
+        </div>
+        <div>
+          <div class="font-medium text-slate-200">parsedCount</div>
+          <div id="debugParsedCount" class="mt-1 text-slate-400">（尚未解析）</div>
+        </div>
       </div>
     </section>
 
@@ -102,6 +128,12 @@ $("execText").textContent = EXEC_URL;
 
 let API_BASE = "";        // 會自動取得穩定入口（googleusercontent）
 let questions = [];
+const debugState = {
+  sanitizedQuery: "（尚未送出查詢）",
+  lastRequestUrl: "（尚未送出請求）",
+  rawResponsePreview: "（尚未送出請求）",
+  parsedCount: "（尚未解析）",
+};
 
 function setStatus(msg, isError = false) {
   $("status").textContent = msg;
@@ -116,6 +148,43 @@ function formatError(err) {
 
 function setApiBaseText() {
   $("apiBaseText").textContent = API_BASE || "（尚未取得）";
+}
+
+function updateDebugDisplay(overrides = {}) {
+  Object.assign(debugState, overrides);
+  $("debugQuery").textContent = debugState.sanitizedQuery;
+  $("debugLastRequestUrl").textContent = debugState.lastRequestUrl;
+  $("debugRaw").textContent = debugState.rawResponsePreview;
+  $("debugParsedCount").textContent = debugState.parsedCount;
+}
+
+function summarizeParsedCount(json) {
+  const count = json?.count ?? json?.total ?? json?.total_count ?? json?.data?.count ?? "";
+  const arrays = [
+    json?.data,
+    json?.questions,
+    json?.items,
+    json?.data?.questions,
+    json?.data?.items,
+  ];
+  const dataLength = arrays.find((a) => Array.isArray(a))?.length ?? "";
+  return `count=${count || "（無）"}，data.length=${dataLength || "（無）"}`;
+}
+
+function sanitizeFilterValue(input) {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return "";
+  if (/^例如/i.test(trimmed)) return "";
+  return trimmed;
+}
+
+function sanitizeDifficulty(input) {
+  const trimmed = sanitizeFilterValue(input);
+  if (!trimmed) return "";
+  if (trimmed.includes("/") && (/例如/i.test(trimmed) || /easy\s*\/\s*normal|normal\s*\/\s*hard/i.test(trimmed))) {
+    return "";
+  }
+  return trimmed;
 }
 
 async function ensureStableBase({ force = false } = {}) {
@@ -170,11 +239,13 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
     if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
   });
 
-  $("lastReq").textContent = url.toString();
+  const finalUrl = url.toString();
+  $("lastReq").textContent = finalUrl;
+  updateDebugDisplay({ lastRequestUrl: finalUrl });
 
   let res;
   try {
-    res = await fetch(url.toString(), {
+    res = await fetch(finalUrl, {
       method,
       headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
       body: method === "POST" ? JSON.stringify(payload || {}) : undefined,
@@ -184,6 +255,7 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
   }
 
   const text = await res.text();
+  updateDebugDisplay({ rawResponsePreview: text.slice(0, 300) || "（空白回應）" });
   let json;
   try {
     json = text ? JSON.parse(text) : {};
@@ -208,6 +280,7 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
     throw err;
   }
 
+  updateDebugDisplay({ parsedCount: summarizeParsedCount(json) });
   return json;
 }
 
@@ -387,8 +460,8 @@ function renderQuiz(q) {
   };
 }
 
-function noFiltersApplied() {
-  return !$("grade").value.trim() && !$("unit").value.trim() && !$("difficulty").value.trim();
+function noFiltersApplied(filters) {
+  return !filters.grade && !filters.unit && !filters.difficulty;
 }
 
 $("btnPing").onclick = async () => {
@@ -409,21 +482,30 @@ $("btnLoad").onclick = async () => {
     setStatus("載入中…");
     await ensureStableBase();
 
+    const filters = {
+      grade: sanitizeFilterValue($("grade").value),
+      unit: sanitizeFilterValue($("unit").value),
+      difficulty: sanitizeDifficulty($("difficulty").value),
+    };
+
     const query = {
       action: "getQuestions",
-      grade: $("grade").value.trim(),
-      unit: $("unit").value.trim(),
-      difficulty: $("difficulty").value.trim(),
       limit: 100,
-      _: Date.now()
+      _: Date.now(),
     };
+
+    if (filters.grade) query.grade = filters.grade;
+    if (filters.unit) query.unit = filters.unit;
+    if (filters.difficulty) query.difficulty = filters.difficulty;
+
+    updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
 
     // 先用穩定入口打
     const r1 = await callApiWithBase(API_BASE, { method: "GET", query });
     const parsed1 = normalizeQuestionList(r1);
 
     // ✅ 若沒填篩選條件，但回來 0 題 → 高機率穩定入口指到舊部署，改用 exec 再打一次
-    if (noFiltersApplied() && parsed1.count === 0) {
+    if (noFiltersApplied(filters) && parsed1.count === 0) {
       const r2 = await callApiWithBase(EXEC_URL, { method: "GET", query });
       const parsed2 = normalizeQuestionList(r2);
 
@@ -444,6 +526,23 @@ $("btnLoad").onclick = async () => {
     setStatus(`載入成功：後端回傳 ${parsed1.count} 題，前端顯示 ${questions.length} 題`);
   } catch (e) {
     setStatus("載入失敗：" + formatError(e), true);
+    renderList([]);
+  }
+};
+
+$("btnLoadAll").onclick = async () => {
+  try {
+    setStatus("載入全部中…");
+    const query = { action: "getQuestions", limit: 100, _: Date.now() };
+    updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
+    const r = await callApiWithBase(EXEC_URL, { method: "GET", query });
+    const parsed = normalizeQuestionList(r);
+    questions = parsed.items;
+    renderList(questions);
+    if (questions.length) renderQuiz(pickOne());
+    setStatus(`載入成功（忽略篩選）：後端回傳 ${parsed.count} 題，前端顯示 ${questions.length} 題`);
+  } catch (e) {
+    setStatus("載入全部失敗：" + formatError(e), true);
     renderList([]);
   }
 };
