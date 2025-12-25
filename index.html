@@ -241,7 +241,7 @@ async function ensureStableBase({ force = false } = {}) {
   return API_BASE;
 }
 
-async function callApiWithBase(base, { method = "GET", action, query = {}, payload } = {}) {
+async function callApiWithBase(base, { method = "GET", action, query = {}, payload, skipDebug = false } = {}) {
   if (!base) {
     throw new Error("缺少 API base URL");
   }
@@ -249,13 +249,19 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
   const url = new URL(base);
   if (action) url.searchParams.set("action", action);
 
+  if (method === "GET" && !query._) {
+    query._ = Date.now();
+  }
+
   Object.entries(query).forEach(([k, v]) => {
     if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
   });
 
   const finalUrl = url.toString();
-  $("lastReq").textContent = finalUrl;
-  updateDebugDisplay({ lastRequestUrl: finalUrl });
+  if (!skipDebug) {
+    $("lastReq").textContent = finalUrl;
+    updateDebugDisplay({ lastRequestUrl: finalUrl });
+  }
 
   let res;
   try {
@@ -269,7 +275,9 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
   }
 
   const text = await res.text();
-  updateDebugDisplay({ rawResponsePreview: text.slice(0, 300) || "（空白回應）" });
+  if (!skipDebug) {
+    updateDebugDisplay({ rawResponsePreview: text.slice(0, 300) || "（空白回應）" });
+  }
   let json;
   try {
     json = text ? JSON.parse(text) : {};
@@ -294,12 +302,14 @@ async function callApiWithBase(base, { method = "GET", action, query = {}, paylo
     throw err;
   }
 
-  updateDebugDisplay({ parsedCount: summarizeParsedCount(json) });
+  if (!skipDebug) {
+    updateDebugDisplay({ parsedCount: summarizeParsedCount(json) });
+  }
   return json;
 }
 
 async function callApi(args) {
-  const { skipExecFallback = false, ...rest } = args || {};
+  const { skipExecFallback = false, skipDebug = false, ...rest } = args || {};
 
   // 先確保有 API_BASE（googleusercontent），若沒有會在需要時使用 exec 備援
   if (!API_BASE) await ensureStableBase();
@@ -309,7 +319,7 @@ async function callApi(args) {
 
   if (primaryBase) {
     try {
-      return await callApiWithBase(primaryBase, rest);
+      return await callApiWithBase(primaryBase, { ...rest, skipDebug });
     } catch (e) {
       primaryError = e;
     }
@@ -321,7 +331,7 @@ async function callApi(args) {
   }
 
   setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(primaryError), true);
-  return await callApiWithBase(API_EXEC_FALLBACK, rest);
+  return await callApiWithBase(API_EXEC_FALLBACK, { ...rest, skipDebug });
 }
 
 function firstArrayCandidate(obj, paths) {
@@ -481,7 +491,6 @@ function renderQuiz(q) {
       user_id: $("user_id").value.trim(),
       q_id: q.question_id,
       chosen_answer: chosenIdx,
-      _: Date.now(),
     };
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(submissionQuery, null, 2), parsedCount: "（尚未解析）" });
 
@@ -491,13 +500,36 @@ function renderQuiz(q) {
     resultEl.appendChild(recordStatus);
 
     try {
-      await callApi({
+      const submitResp = await callApi({
         method: "GET",
         query: submissionQuery,
-        skipExecFallback: true,
       });
 
-      recordStatus.textContent = "已記錄";
+      const parts = [];
+      if (submitResp.log_row) parts.push(`Logs 第 ${submitResp.log_row} 列`);
+      if (submitResp.logs_total) parts.push(`Logs 總筆數 ${submitResp.logs_total}`);
+      if (submitResp.log_timestamp) parts.push(`時間 ${submitResp.log_timestamp}`);
+      if (submitResp.spreadsheet_id) parts.push(`sheet ${submitResp.spreadsheet_id}`);
+
+      let progressText = "";
+      try {
+        const progress = await callApi({
+          method: "GET",
+          query: { action: "getUserProgress", user_id: submissionQuery.user_id },
+          skipDebug: true,
+        });
+        const checks = [];
+        if (progress.logs_count !== undefined) checks.push(`Logs 筆數 ${progress.logs_count}`);
+        if (progress.mastery_count !== undefined) checks.push(`Mastery 筆數 ${progress.mastery_count}`);
+        if (progress.mistakes_count !== undefined) checks.push(`Mistakes 筆數 ${progress.mistakes_count}`);
+        if (progress.sheet_last_row) checks.push(`最後列 ${progress.sheet_last_row}`);
+        if (checks.length) progressText = `（${checks.join("，")}）`;
+      } catch (progressErr) {
+        progressText = `（progress 查詢失敗：${formatError(progressErr)}）`;
+      }
+
+      const detailText = parts.length ? parts.join("，") : "已回傳寫入資訊";
+      recordStatus.textContent = `已記錄：${detailText} ${progressText}`;
       recordStatus.className = "text-xs text-emerald-300 mt-1";
     } catch (e) {
       const hint = formatError(e);
@@ -594,12 +626,39 @@ $("btnLoadAll").onclick = async () => {
     setStatus("載入全部中…");
     const query = { action: "getQuestions", limit: 100, _: Date.now() };
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
-    const r = await callApi({ method: "GET", query });
-    const parsed = normalizeQuestionList(r);
-    questions = parsed.items;
+    await ensureStableBase();
+
+    const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE || API_EXEC_FALLBACK;
+    let usedExec = primaryBase === API_EXEC_FALLBACK;
+    let r1;
+
+    try {
+      r1 = await callApiWithBase(primaryBase, { method: "GET", query });
+    } catch (e) {
+      setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
+      r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
+      usedExec = true;
+    }
+
+    const parsed1 = normalizeQuestionList(r1);
+
+    if (parsed1.count === 0 && !usedExec) {
+      const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
+      const parsed2 = normalizeQuestionList(r2);
+      if (parsed2.count > 0) {
+        questions = parsed2.items;
+        renderList(questions);
+        if (questions.length) renderQuiz(pickOne());
+        setStatus(`⚠️ 穩定入口回 0 題，但 exec 有 ${parsed2.count} 題，已使用備援重新載入。`, true);
+        return;
+      }
+    }
+
+    questions = parsed1.items;
     renderList(questions);
     if (questions.length) renderQuiz(pickOne());
-    setStatus(`載入成功（忽略篩選）：後端回傳 ${parsed.count} 題，前端顯示 ${questions.length} 題`);
+    const suffix = usedExec ? "（使用 exec 備援）" : "";
+    setStatus(`載入成功（忽略篩選）：後端回傳 ${parsed1.count} 題，前端顯示 ${questions.length} 題${suffix}`);
   } catch (e) {
     setStatus("載入全部失敗：" + formatError(e), true);
     renderList([]);

@@ -127,25 +127,43 @@ function handle_(e, method) {
         is_correct = String(chosen_answer).trim() === answerKey;
       }
 
+      const logTimestamp = new Date().toISOString();
+
       // 1) append Logs
-      appendRow_(SHEETS.Logs, {
-        timestamp: new Date().toISOString(),
+      const logRange = appendRow_(SHEETS.Logs, {
+        timestamp: logTimestamp,
         user_id,
         q_id,
         is_correct,
         chosen_answer
       });
+      const logRow = logRange && typeof logRange.getRow === "function"
+        ? logRange.getRow()
+        : ss_().getSheetByName(SHEETS.Logs).getLastRow();
 
       // 2) update Mastery (correct_count, total_count, last_correct_date)
-      updateMastery_(user_id, q_id, is_correct);
+      const masteryUpdated = updateMastery_(user_id, q_id, is_correct);
 
       // 3) update Mistakes (strike, last_date) only when wrong
-      updateMistakes_(user_id, q_id, is_correct);
+      const mistakesUpdated = updateMistakes_(user_id, q_id, is_correct);
 
       // 4) update UserData last_active & streak (simple)
       touchUser_(user_id);
 
-      return json_({ ok: true, is_correct });
+      const logsInfo = readSheetAsObjects2_(SHEETS.Logs);
+      const logsTotal = logsInfo.rows.length;
+
+      return json_({
+        ok: true,
+        is_correct,
+        log_row: logRow,
+        log_timestamp: logTimestamp,
+        logs_total: logsTotal,
+        sheet_last_row: logsInfo.meta?.lastRow || logRow,
+        spreadsheet_id: SPREADSHEET_ID,
+        mastery_updated: Boolean(masteryUpdated),
+        mistakes_updated: Boolean(mistakesUpdated)
+      });
     }
 
     if (action === "getUserSummary") {
@@ -157,6 +175,39 @@ function handle_(e, method) {
       const mistakes = readSheetAsObjects2_(SHEETS.Mistakes).rows.filter(r => String(r.user_id) === user_id);
 
       return json_({ ok: true, user, mastery_count: mastery.length, mistakes_count: mistakes.length });
+    }
+
+    if (action === "getUserProgress") {
+      const user_id = String(p.user_id || "").trim();
+      if (!user_id) return json_({ ok: false, error: "Missing user_id" });
+
+      const logsData = readSheetAsObjects2_(SHEETS.Logs);
+      const masteryData = readSheetAsObjects2_(SHEETS.Mastery);
+      const mistakesData = readSheetAsObjects2_(SHEETS.Mistakes);
+
+      const logs = logsData.rows.filter(r => String(r.user_id) === user_id);
+      const mastery = masteryData.rows.filter(r => String(r.user_id) === user_id);
+      const mistakes = mistakesData.rows.filter(r => String(r.user_id) === user_id);
+
+      const recentLogs = logs
+        .slice()
+        .sort((a, b) => {
+          const tb = new Date(b.timestamp || "").getTime() || 0;
+          const ta = new Date(a.timestamp || "").getTime() || 0;
+          return tb - ta;
+        })
+        .slice(0, 5);
+
+      return json_({
+        ok: true,
+        user_id,
+        logs_count: logs.length,
+        mastery_count: mastery.length,
+        mistakes_count: mistakes.length,
+        recent_logs: recentLogs,
+        sheet_last_row: logsData.meta?.lastRow || "",
+        spreadsheet_id: SPREADSHEET_ID
+      });
     }
 
     return json_({ ok: false, error: "Unknown action" });
@@ -265,7 +316,8 @@ function appendRow_(sheetName, obj) {
 
   const headers = meta.headers;
   const row = headers.map(h => (obj[h] !== undefined ? obj[h] : ""));
-  sh.appendRow(row);
+  const range = sh.appendRow(row);
+  return range;
 }
 
 function findRowIndexByKeys_(sheetName, keyMap) {
@@ -333,7 +385,7 @@ function updateMastery_(user_id, q_id, is_correct) {
       total_count: 1,
       last_correct_date: is_correct ? new Date().toISOString().slice(0, 10) : ""
     });
-    return;
+    return true;
   }
 
   const row = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
@@ -349,13 +401,14 @@ function updateMastery_(user_id, q_id, is_correct) {
   if (is_correct) row[lcdIdx] = new Date().toISOString().slice(0, 10);
 
   sh.getRange(rowIdx, 1, 1, headers.length).setValues([row]);
+  return true;
 }
 
 function updateMistakes_(user_id, q_id, is_correct) {
   const sheet = SHEETS.Mistakes;
   const today = new Date().toISOString().slice(0, 10);
 
-  if (is_correct) return;
+  if (is_correct) return false;
 
   const sh = ss_().getSheetByName(sheet);
   const { meta } = readSheetAsObjects2_(sheet);
@@ -365,7 +418,7 @@ function updateMistakes_(user_id, q_id, is_correct) {
 
   if (rowIdx === -1) {
     appendRow_(sheet, { user_id, q_id, strike: 1, last_date: today });
-    return;
+    return true;
   }
 
   const row = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
@@ -375,6 +428,7 @@ function updateMistakes_(user_id, q_id, is_correct) {
   row[strikeIdx] = Number(row[strikeIdx] || 0) + 1;
   row[lastIdx] = today;
   sh.getRange(rowIdx, 1, 1, headers.length).setValues([row]);
+  return true;
 }
 
 function getOrCreateUser_(user_id, nickname) {
