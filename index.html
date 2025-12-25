@@ -97,7 +97,26 @@
           <div class="font-medium text-slate-200">parsedCount</div>
           <div id="debugParsedCount" class="mt-1 text-slate-400">（尚未解析）</div>
         </div>
+        <div>
+          <div class="font-medium text-slate-200">written_to_spreadsheet_id</div>
+          <div id="debugSheetId" class="mt-1 break-all text-slate-400">（尚未寫入）</div>
+        </div>
       </div>
+    </section>
+
+    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
+      <div class="flex flex-wrap items-center gap-3 justify-between">
+        <div class="space-y-1 text-sm text-slate-200">
+          <div>總題數：<span id="progressTotal">-</span></div>
+          <div>本次已完成：<span id="progressSession">0</span></div>
+          <div>累積已完成：<span id="progressLifetime">-</span></div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="btnSaveProgress" class="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-sm">完成本次（保存進度）</button>
+          <button id="btnResetProgress" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">重新開始（清空進度）</button>
+        </div>
+      </div>
+      <div id="progressHint" class="text-xs text-slate-400 mt-2"></div>
     </section>
 
     <!-- Quiz -->
@@ -118,7 +137,7 @@
    ✅ 設定 API 入口：先 googleusercontent、再 exec 備援
 ========================================================= */
 const API_GOOGLEUSERCONTENT_BASE = "";
-const API_EXEC_FALLBACK = "https://script.google.com/macros/s/AKfycbyouH4rIopFTOQIPcoKosIFIwwd3wi9kvernE3D7lVWuFZp8BCoG8bC6fwIrsFUEVAF/exec";
+const API_EXEC_FALLBACK = "https://script.google.com/macros/s/AKfycbya27B-Xrr1nZzwT6c2eWNrPjMLbuc1nKF70ikVqGtaiZn7XQ5B37uhuyDZ6tWOk6Kh/exec";
 /* ========================================================= */
 
 const LS_KEY = "SLG_API_BASE_STABLE_V1";
@@ -134,7 +153,11 @@ const debugState = {
   lastRequestUrl: "（尚未送出請求）",
   rawResponsePreview: "（尚未送出請求）",
   parsedCount: "（尚未解析）",
+  writtenSheetId: "（尚未寫入）",
 };
+let progressState = { doneIds: [], updated_at: "" };
+let lifetimeDone = 0;
+let totalCountFromApi = 0;
 
 function setStatus(msg, isError = false) {
   $("status").textContent = msg;
@@ -157,6 +180,7 @@ function updateDebugDisplay(overrides = {}) {
   $("debugLastRequestUrl").textContent = debugState.lastRequestUrl;
   $("debugRaw").textContent = debugState.rawResponsePreview;
   $("debugParsedCount").textContent = debugState.parsedCount;
+  if ($("debugSheetId")) $("debugSheetId").textContent = debugState.writtenSheetId || "（尚未寫入）";
 }
 
 function summarizeParsedCount(json) {
@@ -186,6 +210,87 @@ function sanitizeDifficulty(input) {
     return "";
   }
   return trimmed;
+}
+
+function getUserId() {
+  return $("user_id").value.trim() || "guest";
+}
+
+function getProgressKey() {
+  return `slg_progress_${getUserId()}`;
+}
+
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(getProgressKey());
+    if (!raw) return { doneIds: [], updated_at: "" };
+    const parsed = JSON.parse(raw);
+    return {
+      doneIds: Array.isArray(parsed.done_ids) ? parsed.done_ids.map(String) : Array.isArray(parsed.doneIds) ? parsed.doneIds.map(String) : [],
+      updated_at: parsed.updated_at || ""
+    };
+  } catch (_) {
+    return { doneIds: [], updated_at: "" };
+  }
+}
+
+function saveProgress() {
+  progressState.updated_at = new Date().toISOString();
+  localStorage.setItem(getProgressKey(), JSON.stringify({
+    done_ids: progressState.doneIds,
+    updated_at: progressState.updated_at,
+  }));
+  updateProgressUI();
+}
+
+function resetProgress() {
+  progressState = { doneIds: [], updated_at: "" };
+  localStorage.removeItem(getProgressKey());
+  updateProgressUI();
+}
+
+function updateProgressUI() {
+  $("progressTotal").textContent = totalCountFromApi || "-";
+  $("progressSession").textContent = progressState.doneIds.length;
+  $("progressLifetime").textContent = (lifetimeDone || lifetimeDone === 0) ? lifetimeDone : "-";
+
+  const remaining = totalCountFromApi ? Math.max(totalCountFromApi - progressState.doneIds.length, 0) : 0;
+  if (remaining === 0 && totalCountFromApi > 0) {
+    $("progressHint").textContent = "全部題目都完成了！可按「重新開始」清空進度。";
+  } else {
+    $("progressHint").textContent = remaining > 0 ? `尚有 ${remaining} 題未作答，系統會優先出未做過的題目。` : "";
+  }
+}
+
+function ensureProgressLoaded() {
+  progressState = loadProgress();
+  updateProgressUI();
+}
+
+function markQuestionDone(qId) {
+  const id = String(qId || "");
+  if (!id) return;
+  if (!progressState.doneIds.includes(id)) {
+    progressState.doneIds.push(id);
+    saveProgress();
+    if (questions.length) renderList(questions);
+  } else {
+    updateProgressUI();
+  }
+}
+
+async function refreshLifetimeProgress() {
+  try {
+    const r = await callApi({
+      method: "GET",
+      query: { action: "getUserProgress", user_id: getUserId() },
+      skipDebug: true,
+    });
+    lifetimeDone = Number(r.logs_count || 0);
+    updateProgressUI();
+  } catch (_) {
+    // 靜默忽略，debug 區塊已可查詢 raw response
+  }
 }
 
 async function ensureStableBase({ force = false } = {}) {
@@ -334,6 +439,33 @@ async function callApi(args) {
   return await callApiWithBase(API_EXEC_FALLBACK, { ...rest, skipDebug });
 }
 
+async function fetchQuestionsWithFallback(query) {
+  await ensureStableBase();
+
+  const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE;
+  let usedExec = false;
+  let r1;
+
+  try {
+    if (!primaryBase) throw new Error("缺少穩定入口");
+    r1 = await callApiWithBase(primaryBase, { method: "GET", query });
+  } catch (e) {
+    usedExec = true;
+    setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
+    r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
+  }
+
+  const parsed1 = normalizeQuestionList(r1);
+
+  if (parsed1.count === 0 && !usedExec) {
+    const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
+    const parsed2 = normalizeQuestionList(r2);
+    return { parsed: parsed2, usedExec: true, primaryCount: parsed1.count };
+  }
+
+  return { parsed: parsed1, usedExec };
+}
+
 function firstArrayCandidate(obj, paths) {
   for (const path of paths) {
     let cur = obj;
@@ -395,13 +527,43 @@ function normalizeQuestion(q) {
 }
 
 function pickOne() {
+  if (!questions.length) return null;
   return questions[Math.floor(Math.random() * questions.length)];
+}
+
+function pickNextQuestionPreferFresh() {
+  const undone = questions.filter(q => !progressState.doneIds.includes(String(q.question_id)));
+  if (undone.length) return undone[Math.floor(Math.random() * undone.length)];
+  return pickOne();
+}
+
+function handleLoadedQuestions(parsed, { usedExec = false } = {}) {
+  questions = parsed.items;
+  totalCountFromApi = parsed.count || parsed.items.length || 0;
+  ensureProgressLoaded();
+  refreshLifetimeProgress();
+  updateProgressUI();
+  renderList(questions);
+  if (questions.length) {
+    const next = pickNextQuestionPreferFresh();
+    renderQuiz(next);
+  } else {
+    renderQuiz(null);
+  }
+
+  const suffix = usedExec ? "（使用 exec 備援）" : "";
+  if (questions.length) {
+    setStatus(`載入成功：後端回傳 ${parsed.count} 題，前端顯示 ${questions.length} 題${suffix}`);
+  } else {
+    setStatus(`載入結果為 0 題${suffix}`, true);
+  }
 }
 
 function renderList(items) {
   $("list").innerHTML = "";
+  const undone = items.filter((q) => !progressState.doneIds.includes(String(q.question_id)));
   $("count").textContent = items.length
-    ? `共 ${items.length} 題（目前顯示）`
+    ? `共 ${items.length} 題（目前顯示），未做過 ${undone.length} 題`
     : "目前沒有符合條件的題目";
 
   if (!items.length) {
@@ -422,9 +584,12 @@ function renderList(items) {
       <div class="text-sm text-slate-300 mt-1">
         年級 ${escapeHtml(String(q.grade ?? ""))}｜${escapeHtml(q.unit || "")}｜${escapeHtml(q.difficulty || "")}
       </div>
-      <button class="mt-2 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-        作答
-      </button>
+      <div class="mt-2 flex items-center gap-2">
+        <button class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+          作答
+        </button>
+        ${progressState.doneIds.includes(String(q.question_id)) ? '<span class="text-xs text-emerald-300">已完成</span>' : ""}
+      </div>
     `;
     card.querySelector("button").onclick = () => renderQuiz(q);
     $("list").appendChild(card);
@@ -432,6 +597,12 @@ function renderList(items) {
 }
 
 function renderQuiz(q) {
+  if (!q) {
+    $("quiz").classList.add("hidden");
+    $("quiz").innerHTML = "";
+    return;
+  }
+
   const quiz = $("quiz");
   quiz.classList.remove("hidden");
 
@@ -465,7 +636,7 @@ function renderQuiz(q) {
 
   $("next").onclick = () => {
     if (!questions.length) return;
-    renderQuiz(pickOne());
+    renderQuiz(pickNextQuestionPreferFresh());
   };
 
   $("submit").onclick = async () => {
@@ -488,7 +659,7 @@ function renderQuiz(q) {
 
     const submissionQuery = {
       action: "submitAnswer",
-      user_id: $("user_id").value.trim(),
+      user_id: getUserId(),
       q_id: q.question_id,
       chosen_answer: chosenIdx,
     };
@@ -500,7 +671,8 @@ function renderQuiz(q) {
     resultEl.appendChild(recordStatus);
 
     try {
-      const submitResp = await callApi({
+      // 提交答案固定走 exec，避免 JSON POST 觸發 preflight
+      const submitResp = await callApiWithBase(API_EXEC_FALLBACK, {
         method: "GET",
         query: submissionQuery,
       });
@@ -509,7 +681,18 @@ function renderQuiz(q) {
       if (submitResp.log_row) parts.push(`Logs 第 ${submitResp.log_row} 列`);
       if (submitResp.logs_total) parts.push(`Logs 總筆數 ${submitResp.logs_total}`);
       if (submitResp.log_timestamp) parts.push(`時間 ${submitResp.log_timestamp}`);
-      if (submitResp.spreadsheet_id) parts.push(`sheet ${submitResp.spreadsheet_id}`);
+      if (submitResp.written_to_spreadsheet_id) parts.push(`sheet ${submitResp.written_to_spreadsheet_id}`);
+
+      debugState.writtenSheetId = submitResp.written_to_spreadsheet_id || submitResp.spreadsheet_id || "（未回傳）";
+      updateDebugDisplay();
+
+      const serverExplanation = submitResp.explanation || q.explanation || "";
+      if (!localCorrect && serverExplanation) {
+        const explain = document.createElement("div");
+        explain.className = "mt-2 text-slate-200";
+        explain.innerHTML = `<div class="font-semibold text-amber-300">解析：</div>${escapeHtml(serverExplanation)}`;
+        resultEl.appendChild(explain);
+      }
 
       let progressText = "";
       try {
@@ -518,19 +701,33 @@ function renderQuiz(q) {
           query: { action: "getUserProgress", user_id: submissionQuery.user_id },
           skipDebug: true,
         });
+        lifetimeDone = Number(progress.logs_count || 0);
         const checks = [];
-        if (progress.logs_count !== undefined) checks.push(`Logs 筆數 ${progress.logs_count}`);
-        if (progress.mastery_count !== undefined) checks.push(`Mastery 筆數 ${progress.mastery_count}`);
-        if (progress.mistakes_count !== undefined) checks.push(`Mistakes 筆數 ${progress.mistakes_count}`);
+        if (progress.logs_count !== undefined) checks.push(`Logs ${progress.logs_count}`);
+        if (progress.mastery_count !== undefined) checks.push(`Mastery ${progress.mastery_count}`);
+        if (progress.mistakes_count !== undefined) checks.push(`Mistakes ${progress.mistakes_count}`);
         if (progress.sheet_last_row) checks.push(`最後列 ${progress.sheet_last_row}`);
         if (checks.length) progressText = `（${checks.join("，")}）`;
       } catch (progressErr) {
         progressText = `（progress 查詢失敗：${formatError(progressErr)}）`;
       }
 
+      markQuestionDone(q.question_id);
+
       const detailText = parts.length ? parts.join("，") : "已回傳寫入資訊";
       recordStatus.textContent = `已記錄：${detailText} ${progressText}`;
       recordStatus.className = "text-xs text-emerald-300 mt-1";
+
+      const delay = 600 + Math.floor(Math.random() * 300);
+      setTimeout(() => {
+        if (!questions.length) return;
+        const nextQ = pickNextQuestionPreferFresh();
+        if (nextQ) {
+          renderQuiz(nextQ);
+        } else {
+          setStatus("目前沒有題目可出，請重新載入或重新開始。", true);
+        }
+      }, delay);
     } catch (e) {
       const hint = formatError(e);
       recordStatus.textContent = `未記錄（不影響測驗）。請重新整理或換網路再試。${hint ? " 詳細：" + hint : ""}`;
@@ -579,42 +776,8 @@ $("btnLoad").onclick = async () => {
 
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
 
-    // 先用 googleusercontent 打，失敗再 fallback exec
-    const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE || API_EXEC_FALLBACK;
-    let r1;
-    let usedExecAsPrimary = primaryBase === API_EXEC_FALLBACK;
-
-    try {
-      r1 = await callApiWithBase(primaryBase, { method: "GET", query });
-    } catch (e) {
-      if (usedExecAsPrimary) throw e;
-      setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
-      r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-      usedExecAsPrimary = true;
-    }
-
-    const parsed1 = normalizeQuestionList(r1);
-
-    // ✅ 若沒填篩選條件，但回來 0 題 → 高機率穩定入口指到舊部署，改用 exec 再打一次
-    if (noFiltersApplied(filters) && parsed1.count === 0 && !usedExecAsPrimary) {
-      const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-      const parsed2 = normalizeQuestionList(r2);
-
-      if (parsed2.count > 0) {
-        // 直接用 exec 的資料呈現，並提示你該刷新穩定入口
-        questions = parsed2.items;
-        renderList(questions);
-        if (questions.length) renderQuiz(pickOne());
-        setStatus(`⚠️ 穩定入口回 0 題，但 exec 有 ${parsed2.count} 題。請按「重新取得穩定入口」修正。`, true);
-        return;
-      }
-    }
-
-    questions = parsed1.items;
-    renderList(questions);
-    if (questions.length) renderQuiz(pickOne());
-
-    setStatus(`載入成功：後端回傳 ${parsed1.count} 題，前端顯示 ${questions.length} 題`);
+    const { parsed, usedExec } = await fetchQuestionsWithFallback(query);
+    handleLoadedQuestions(parsed, { usedExec });
   } catch (e) {
     setStatus("載入失敗：" + formatError(e), true);
     renderList([]);
@@ -626,39 +789,8 @@ $("btnLoadAll").onclick = async () => {
     setStatus("載入全部中…");
     const query = { action: "getQuestions", limit: 100, _: Date.now() };
     updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
-    await ensureStableBase();
-
-    const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE || API_EXEC_FALLBACK;
-    let usedExec = primaryBase === API_EXEC_FALLBACK;
-    let r1;
-
-    try {
-      r1 = await callApiWithBase(primaryBase, { method: "GET", query });
-    } catch (e) {
-      setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
-      r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-      usedExec = true;
-    }
-
-    const parsed1 = normalizeQuestionList(r1);
-
-    if (parsed1.count === 0 && !usedExec) {
-      const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-      const parsed2 = normalizeQuestionList(r2);
-      if (parsed2.count > 0) {
-        questions = parsed2.items;
-        renderList(questions);
-        if (questions.length) renderQuiz(pickOne());
-        setStatus(`⚠️ 穩定入口回 0 題，但 exec 有 ${parsed2.count} 題，已使用備援重新載入。`, true);
-        return;
-      }
-    }
-
-    questions = parsed1.items;
-    renderList(questions);
-    if (questions.length) renderQuiz(pickOne());
-    const suffix = usedExec ? "（使用 exec 備援）" : "";
-    setStatus(`載入成功（忽略篩選）：後端回傳 ${parsed1.count} 題，前端顯示 ${questions.length} 題${suffix}`);
+    const { parsed, usedExec } = await fetchQuestionsWithFallback(query);
+    handleLoadedQuestions(parsed, { usedExec });
   } catch (e) {
     setStatus("載入全部失敗：" + formatError(e), true);
     renderList([]);
@@ -681,6 +813,26 @@ $("btnClearCache").onclick = () => {
   setStatus("已清除 API 快取（請按 Ping 或重新取得穩定入口）");
 };
 
+$("btnSaveProgress").onclick = () => {
+  saveProgress();
+  setStatus("✅ 已保存本次進度");
+};
+
+$("btnResetProgress").onclick = () => {
+  resetProgress();
+  setStatus("已清空進度，優先出未做過題目。");
+  if (questions.length) {
+    renderQuiz(pickNextQuestionPreferFresh());
+    renderList(questions);
+  }
+};
+
+$("user_id").addEventListener("change", () => {
+  ensureProgressLoaded();
+  refreshLifetimeProgress();
+  setStatus("已切換使用者，請重新載入題目以更新題庫。");
+});
+
 // 防 XSS：把題目文字安全輸出
 function escapeHtml(s) {
   return String(s)
@@ -695,6 +847,8 @@ function escapeHtml(s) {
 (async function init() {
   try {
     await ensureStableBase();
+    ensureProgressLoaded();
+    refreshLifetimeProgress();
   } catch (_) {
     // 不擋 UI，使用者可手動 Ping
   }
