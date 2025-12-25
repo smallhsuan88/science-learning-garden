@@ -1,365 +1,237 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>自然科學習花園</title>
-
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Science Learning Garden</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
-    body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; overflow: hidden; }
-    .animate-bounce-slow { animation: bounce 3s infinite; }
-    @keyframes bounce { 0%, 100% { transform: translateY(-5%); } 50% { transform: translateY(0); } }
-  </style>
 </head>
 
-<body>
-  <div id="root">
-    <div class="flex items-center justify-center h-screen bg-white">
-      <div class="text-center">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
-        <p class="text-gray-500 font-bold">正在準備喬喬的小花園...</p>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-5xl mx-auto p-6">
+
+    <!-- ===== Header ===== -->
+    <header class="mb-6">
+      <h1 class="text-2xl font-semibold">🌱 Science Learning Garden</h1>
+      <p class="text-slate-300 mt-2">
+        GitHub Pages 前端 × Google Apps Script API × Google Sheet 題庫
+      </p>
+    </header>
+
+    <!-- ===== Controls ===== -->
+    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">使用者 ID</label>
+          <input id="user_id" value="u001"
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">年級 (grade)</label>
+          <input id="grade" placeholder="例如 3"
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">單元 (unit)</label>
+          <input id="unit" placeholder="例如 植物的構造"
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">難度 (difficulty)</label>
+          <input id="difficulty" placeholder="Normal"
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+        </div>
+        <div class="flex items-end gap-2">
+          <button id="btnPing"
+            class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">
+            Ping API
+          </button>
+          <button id="btnLoad"
+            class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-medium">
+            載入題目
+          </button>
+        </div>
       </div>
-    </div>
+
+      <div id="status" class="mt-3 text-sm text-slate-300"></div>
+    </section>
+
+    <!-- ===== Quiz ===== -->
+    <section id="quiz"
+      class="hidden bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
+    </section>
+
+    <!-- ===== List ===== -->
+    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">題目清單</h2>
+        <div id="count" class="text-sm text-slate-300"></div>
+      </div>
+      <div id="list" class="mt-3 space-y-3"></div>
+    </section>
+
   </div>
 
-  <script type="text/babel">
-    const { useState, useEffect, useCallback } = React;
+<script>
+/* =========================================================
+   🔧 設定區（你只需要確認這裡）
+========================================================= */
+const API_BASE =
+  "https://script.google.com/macros/s/AKfycbxy9T33HfqvChKFR8gVfNhS5DLT9lXprWC5cXCcBmRh4vSLr0r9jWIMnSREkApQpzXG/exec";
 
-    // --- SVG icons ---
-    const IconDroplets = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 16.3c2.2 0 4-1.8 4-4 0-3.3-4-6-4-6s-4 2.7-4 6c0 2.2 1.8 4 4 4Z"/><path d="M17 16.3c2.2 0 4-1.8 4-4 0-3.3-4-6-4-6s-4 2.7-4 6c0 2.2 1.8 4 4 4Z"/></svg>;
-    const IconSun = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/></svg>;
-    const IconZap = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>;
-    const IconHome = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
-    const IconSprout = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 20h10"/><path d="M10 20c5.5-2.5 8-6.4 8-10"/><path d="M14 20c-5.5-2.5-8-6.4-8-10"/><path d="M12 20V9"/><path d="M12 9a4 4 0 0 1 8-4h-8a4 4 0 0 0-8 4h8Z"/></svg>;
-    const IconChart = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>;
+// 若後端 REQUIRE_KEY=true，填入同一串；否則留空 ""
+const API_KEY = "";
 
-    const stageEmoji = (stage) => (
-      stage === 'sprout' ? '🌱' :
-      stage === 'growth' ? '🌿' :
-      stage === 'flower' ? '🌻' : '🍎'
-    );
+/* ========================================================= */
 
-    const App = () => {
-      const [view, setView] = useState('dashboard');
-      const [isLoading, setIsLoading] = useState(true);
-      const [loadError, setLoadError] = useState(null);
+const $ = (id) => document.getElementById(id);
+let questions = [];
+let current = null;
 
-      const [user, setUser] = useState(null);
-      const [questions, setQuestions] = useState([]);
-      const [plants, setPlants] = useState([]);
+function setStatus(msg, isError=false) {
+  $("status").textContent = msg;
+  $("status").className =
+    "mt-3 text-sm " + (isError ? "text-rose-300" : "text-slate-300");
+}
 
-      const [quizState, setQuizState] = useState({ active: false, currentIdx: 0, questions: [], results: [], streak: 0 });
-      const [showFeedback, setShowFeedback] = useState(null);
+async function apiGet(params) {
+  const url = new URL(API_BASE);
+  Object.entries(params).forEach(([k,v]) => {
+    if (v !== "" && v !== undefined && v !== null)
+      url.searchParams.set(k, v);
+  });
+  if (API_KEY) url.searchParams.set("key", API_KEY);
 
-      // 初始化
-      useEffect(() => {
-        if (!google?.script?.run) {
-          setLoadError('找不到 google.script.run，請確認你是用 Web App 網址開啟（不是直接開 HTML）。');
-          setIsLoading(false);
-          return;
-        }
+  const res = await fetch(url.toString());
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "API error");
+  return json;
+}
 
-        google.script.run
-          .withFailureHandler(err => {
-            console.error(err);
-            setLoadError('後端呼叫失敗：' + (err?.message || JSON.stringify(err)));
-            setIsLoading(false);
-          })
-          .withSuccessHandler(data => {
-            console.log('getAppData:', data);
+async function apiSubmitAnswer(payload) {
+  const url = new URL(API_BASE);
+  url.searchParams.set("action", "submitAnswer");
+  if (API_KEY) url.searchParams.set("key", API_KEY);
 
-            if (!data || data.status !== 'success') {
-              setLoadError((data?.message || '資料載入失敗（未知原因）') + (data?.debug ? '\n\nDebug: ' + JSON.stringify(data.debug, null, 2) : ''));
-              setIsLoading(false);
-              return;
-            }
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || "API error");
+  return json;
+}
 
-            const u = data.user;
-            const cleanUser = {
-              ...u,
-              resources: {
-                water: Number(u.water || 0),
-                sunlight: Number(u.sunlight || 0),
-                fertilizer: Number(u.fertilizer || 0)
-              },
-              streak: Number(u.streak || 0)
-            };
+function pickOne() {
+  return questions[Math.floor(Math.random() * questions.length)];
+}
 
-            const plant0 = (data.plants && data.plants.length) ? data.plants[0] : { plant_id:'p1', seed_type:'未命名', growth_points:0, stage:'sprout' };
+function renderQuiz(q) {
+  current = q;
+  const quiz = $("quiz");
+  quiz.classList.remove("hidden");
 
-            setUser(cleanUser);
-            setQuestions(Array.isArray(data.questions) ? data.questions : []);
-            setPlants([plant0]);
-            setIsLoading(false);
-          })
-          .getAppData();
-      }, []);
+  const options = String(q.options).split(",").map(s=>s.trim());
 
-      const syncWithGAS = useCallback((updatedUser, updatedPlant) => {
-        if (!google?.script?.run) return;
-        google.script.run
-          .withFailureHandler(err => console.error('saveProgress failed:', err))
-          .saveProgress({ user: updatedUser, plant: updatedPlant });
-      }, []);
+  quiz.innerHTML = `
+    <div class="text-xl font-semibold mb-3">${q.stem}</div>
+    <div class="space-y-2">
+      ${options.map((op,i)=>`
+        <label class="flex gap-2 p-2 border border-slate-800 rounded cursor-pointer">
+          <input type="radio" name="opt" value="${i}" />
+          <span>${op}</span>
+        </label>`).join("")}
+    </div>
+    <div class="mt-3 flex gap-2">
+      <button id="submit"
+        class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500">
+        送出
+      </button>
+      <button id="next"
+        class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">
+        換一題
+      </button>
+    </div>
+    <div id="result" class="mt-3 text-sm"></div>
+    <details class="mt-3">
+      <summary class="cursor-pointer text-slate-300">解析</summary>
+      <div class="mt-2 text-slate-200">${q.explanation || ""}</div>
+    </details>
+  `;
 
-      const startQuiz = () => {
-        const pool = Array.isArray(questions) ? questions : [];
-        const shuffled = [...pool].sort(() => 0.5 - Math.random()).slice(0, 5);
+  $("next").onclick = () => renderQuiz(pickOne());
 
-        if (!shuffled.length) {
-          alert("題庫目前是空的喔！");
-          return;
-        }
-        setQuizState({ active: true, currentIdx: 0, questions: shuffled, results: [], streak: user.streak });
-        setShowFeedback(null);
-        setView('quiz');
-      };
+  $("submit").onclick = async () => {
+    const picked = quiz.querySelector("input[name=opt]:checked");
+    if (!picked) {
+      $("result").textContent = "請選擇答案";
+      return;
+    }
+    try {
+      const res = await apiSubmitAnswer({
+        user_id: $("user_id").value,
+        q_id: q.question_id,
+        chosen_answer: picked.value
+      });
+      $("result").textContent =
+        res.is_correct ? "✅ 答對了！" : "❌ 答錯了";
+    } catch (e) {
+      $("result").textContent = "送出失敗：" + e.message;
+    }
+  };
+}
 
-      const handleAnswer = (optionIdx) => {
-        const currentQ = quizState.questions[quizState.currentIdx];
-        const isCorrect = Number(optionIdx) === Number(currentQ.answer_key);
-        const newStreak = isCorrect ? (Number(user.streak) || 0) + 1 : 0;
+function renderList(items) {
+  $("list").innerHTML = "";
+  $("count").textContent = `共 ${items.length} 題`;
 
-        setShowFeedback({ isCorrect, explanation: currentQ.explanation || '' });
+  items.forEach(q => {
+    const card = document.createElement("div");
+    card.className =
+      "p-4 border border-slate-800 rounded bg-slate-950/40";
+    card.innerHTML = `
+      <div class="font-semibold">${q.stem}</div>
+      <div class="text-sm text-slate-300 mt-1">
+        年級 ${q.grade}｜${q.unit}｜${q.difficulty}
+      </div>
+      <button class="mt-2 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+        作答
+      </button>`;
+    card.querySelector("button").onclick = () => renderQuiz(q);
+    $("list").appendChild(card);
+  });
+}
 
-        // log
-        google.script.run
-          .withFailureHandler(err => console.error('logAnswer failed:', err))
-          .logAnswer({
-            user_id: user.user_id,
-            q_id: currentQ.question_id,
-            is_correct: isCorrect,
-            chosen_answer: optionIdx
-          });
+/* ===== Buttons ===== */
 
-        const newUser = {
-          ...user,
-          streak: newStreak,
-          resources: { ...user.resources }
-        };
+$("btnPing").onclick = async () => {
+  try {
+    const r = await apiGet({ action:"ping" });
+    setStatus("API OK：" + r.message);
+  } catch (e) {
+    setStatus("Ping 失敗：" + e.message, true);
+  }
+};
 
-        if (isCorrect) {
-          newUser.resources.water += 1;
-          if (newStreak % 3 === 0 && newStreak > 0) newUser.resources.sunlight += 1;
-        } else {
-          // 你也可以在這裡設計：答錯給一點肥料作為鼓勵
-          // newUser.resources.fertilizer += 1;
-        }
-
-        setUser(newUser);
-        syncWithGAS(newUser, plants[0]);
-
-        setQuizState(prev => ({
-          ...prev,
-          results: [...prev.results, { isCorrect }],
-          streak: newStreak
-        }));
-      };
-
-      const applyResource = (type) => {
-        if (!plants[0]) return;
-        if ((user.resources[type] || 0) <= 0) return;
-
-        const boost = type === 'water' ? 2 : type === 'sunlight' ? 5 : 10;
-        const currentPoints = Number(plants[0].growth_points || 0);
-        const newPoints = Math.min(100, currentPoints + boost);
-
-        let newStage = 'sprout';
-        if (newPoints >= 100) newStage = 'fruit';
-        else if (newPoints > 70) newStage = 'flower';
-        else if (newPoints > 30) newStage = 'growth';
-
-        const updatedPlant = { ...plants[0], growth_points: newPoints, stage: newStage };
-        const newUser = { ...user, resources: { ...user.resources, [type]: (user.resources[type] || 0) - 1 } };
-
-        setUser(newUser);
-        setPlants([updatedPlant]);
-        syncWithGAS(newUser, updatedPlant);
-      };
-
-      // Loading / Error UI
-      if (isLoading) {
-        return <div className="h-screen flex items-center justify-center text-gray-500">正在同步雲端資料...</div>;
-      }
-
-      if (loadError) {
-        return (
-          <div className="h-screen flex items-center justify-center bg-gray-50 p-6">
-            <div className="max-w-xl w-full bg-white border rounded-2xl p-6 shadow">
-              <div className="text-xl font-bold text-red-600 mb-2">資料尚未就緒</div>
-              <div className="text-sm text-gray-600 whitespace-pre-wrap">
-                {loadError}
-              </div>
-              <div className="mt-4 text-xs text-gray-500">
-                小提示：最常見原因是 Apps Script 沒有指到正確的 Spreadsheet（請在 Code.gs 設定 SPREADSHEET_ID）。
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      const plant = plants[0];
-
-      return (
-        <div className="max-w-md mx-auto h-screen bg-white flex flex-col shadow-xl overflow-hidden">
-          <header className="bg-white p-4 border-b flex justify-between items-center shrink-0">
-            <h1 className="font-bold text-green-600 text-lg">自然小玩家</h1>
-            <div className="text-xs bg-orange-100 text-orange-600 px-3 py-1 rounded-full font-bold">
-              {user.nickname} 的種植紀錄
-            </div>
-          </header>
-
-          <main className="flex-1 overflow-y-auto bg-gray-50">
-            {view === 'dashboard' && (
-              <div className="p-4 space-y-4">
-                <div className="bg-green-600 rounded-3xl p-6 text-white shadow-lg">
-                  <h2 className="text-xl font-bold">今日能量狀態</h2>
-                  <div className="mt-6 flex gap-4">
-                    <div className="flex-1 bg-white/10 p-3 rounded-2xl text-center">
-                      <div className="flex justify-center mb-1 text-blue-200"><IconDroplets/></div>
-                      <span className="text-lg font-bold">{user.resources.water}</span>
-                    </div>
-                    <div className="flex-1 bg-white/10 p-3 rounded-2xl text-center">
-                      <div className="flex justify-center mb-1 text-yellow-200"><IconSun/></div>
-                      <span className="text-lg font-bold">{user.resources.sunlight}</span>
-                    </div>
-                    <div className="flex-1 bg-white/10 p-3 rounded-2xl text-center">
-                      <div className="flex justify-center mb-1 text-purple-200"><IconZap/></div>
-                      <span className="text-lg font-bold">{user.resources.fertilizer}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <button onClick={startQuiz} className="w-full bg-white border-2 border-green-500 text-green-600 py-4 rounded-2xl font-bold shadow-sm active:scale-95 transition-all">
-                  ⚡ 進入測驗獲取資源
-                </button>
-
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-                  <div className="flex items-center gap-4">
-                    <div className="text-4xl">{stageEmoji(plant.stage)}</div>
-                    <div className="flex-1">
-                      <p className="font-bold text-gray-800">{plant.seed_type}</p>
-                      <div className="w-full bg-gray-100 h-2 rounded-full mt-2">
-                        <div className="bg-green-500 h-2 rounded-full transition-all duration-1000" style={{width: `${plant.growth_points}%`}}></div>
-                      </div>
-                      <div className="text-xs text-gray-400 mt-2">成長值：{plant.growth_points}%</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {view === 'quiz' && quizState.questions.length > 0 && (
-              <div className="p-4 flex flex-col h-full">
-                <div className="bg-white p-6 rounded-3xl shadow-md border border-gray-100 flex-1 flex flex-col">
-                  <p className="text-xs text-blue-500 font-bold mb-2">
-                    單元：{quizState.questions[quizState.currentIdx].unit || '未分類'}
-                  </p>
-
-                  <h3 className="text-lg font-bold text-gray-800 mb-8 leading-relaxed">
-                    {quizState.questions[quizState.currentIdx].stem}
-                  </h3>
-
-                  <div className="space-y-3">
-                    {(quizState.questions[quizState.currentIdx].options || []).map((opt, i) => (
-                      <button
-                        key={i}
-                        disabled={!!showFeedback}
-                        onClick={() => handleAnswer(i)}
-                        className={`w-full p-4 rounded-2xl text-left border-2 transition-all ${
-                          showFeedback
-                            ? i === Number(quizState.questions[quizState.currentIdx].answer_key)
-                              ? 'border-green-500 bg-green-50 text-green-700 font-bold'
-                              : 'border-gray-50 text-gray-300'
-                            : 'border-gray-100 hover:border-green-500 active:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        {i+1}. {opt}
-                      </button>
-                    ))}
-                  </div>
-
-                  {showFeedback && (
-                    <div className="mt-auto pt-6 border-t border-dashed">
-                      <p className={`text-sm font-bold ${showFeedback.isCorrect ? 'text-green-600' : 'text-red-500'} mb-2`}>
-                        {showFeedback.isCorrect ? '✅ 答對了！' : '❌ 可惜答錯了，看解析學習吧'}
-                      </p>
-                      <p className="text-xs text-gray-500 mb-4">{showFeedback.explanation}</p>
-
-                      <button
-                        onClick={() => {
-                          setShowFeedback(null);
-                          if (quizState.currentIdx + 1 < quizState.questions.length) {
-                            setQuizState(p => ({...p, currentIdx: p.currentIdx + 1}));
-                          } else {
-                            setView('dashboard');
-                          }
-                        }}
-                        className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg"
-                      >
-                        {quizState.currentIdx + 1 < quizState.questions.length ? '下一題' : '返回花園'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {view === 'garden' && (
-              <div className="p-4 h-full flex flex-col items-center justify-center space-y-12">
-                <div className="text-[100px] animate-bounce-slow drop-shadow-lg">{stageEmoji(plant.stage)}</div>
-                <div className="flex gap-8">
-                  <button onClick={() => applyResource('water')} className="flex flex-col items-center gap-2">
-                    <div className="bg-white p-5 rounded-3xl shadow-md text-blue-500 active:scale-90 transition-all border border-blue-50"><IconDroplets/></div>
-                    <span className="text-sm font-bold text-gray-500">{user.resources.water}</span>
-                  </button>
-                  <button onClick={() => applyResource('sunlight')} className="flex flex-col items-center gap-2">
-                    <div className="bg-white p-5 rounded-3xl shadow-md text-yellow-500 active:scale-90 transition-all border border-yellow-50"><IconSun/></div>
-                    <span className="text-sm font-bold text-gray-500">{user.resources.sunlight}</span>
-                  </button>
-                  <button onClick={() => applyResource('fertilizer')} className="flex flex-col items-center gap-2">
-                    <div className="bg-white p-5 rounded-3xl shadow-md text-purple-500 active:scale-90 transition-all border border-purple-50"><IconZap/></div>
-                    <span className="text-sm font-bold text-gray-500">{user.resources.fertilizer}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {view === 'progress' && (
-              <div className="p-6 space-y-6">
-                <h2 className="text-xl font-bold text-gray-800">成長週報表</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 text-center">
-                    <p className="text-xs text-blue-600 font-bold mb-1">目前連勝</p>
-                    <p className="text-3xl font-bold text-blue-800">{user.streak}</p>
-                  </div>
-                  <div className="bg-green-50 p-6 rounded-3xl border border-green-100 text-center">
-                    <p className="text-xs text-green-600 font-bold mb-1">植物能量</p>
-                    <p className="text-3xl font-bold text-green-800">{plant.growth_points}%</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </main>
-
-          <nav className="bg-white border-t p-4 flex justify-around shrink-0 shadow-inner">
-            <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'text-green-600' : 'text-gray-300'}><IconHome/></button>
-            <button onClick={() => setView('garden')} className={view === 'garden' ? 'text-green-600' : 'text-gray-300'}><IconSprout/></button>
-            <button onClick={() => setView('progress')} className={view === 'progress' ? 'text-green-600' : 'text-gray-300'}><IconChart/></button>
-          </nav>
-        </div>
-      );
-    };
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
+$("btnLoad").onclick = async () => {
+  try {
+    setStatus("載入中…");
+    const r = await apiGet({
+      action: "getQuestions",
+      grade: $("grade").value,
+      unit: $("unit").value,
+      difficulty: $("difficulty").value,
+      limit: 100
+    });
+    questions = r.data;
+    renderList(questions);
+    renderQuiz(pickOne());
+    setStatus(`載入成功，共 ${r.count} 題`);
+  } catch (e) {
+    setStatus("載入失敗：" + e.message, true);
+  }
+};
+</script>
 </body>
 </html>
