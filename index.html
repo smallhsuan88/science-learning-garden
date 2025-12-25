@@ -83,35 +83,121 @@ const $ = (id) => document.getElementById(id);
 $("apiBaseText").textContent = API_BASE;
 
 let questions = [];
-let current = null;
 
-function setStatus(msg, isError=false) {
+function setStatus(msg, isError = false) {
   $("status").textContent = msg;
   $("status").className = "mt-3 text-sm " + (isError ? "text-rose-300" : "text-slate-300");
 }
 
-async function apiGet(params) {
+function formatError(err) {
+  if (!err) return "未知錯誤";
+  if (err.httpStatus) return `HTTP ${err.httpStatus}：${err.message}`;
+  return err.message || String(err);
+}
+
+async function callApi({ method = "GET", action, query = {}, payload } = {}) {
   const url = new URL(API_BASE);
-  Object.entries(params).forEach(([k,v]) => {
+  if (action) url.searchParams.set("action", action);
+  Object.entries(query).forEach(([k, v]) => {
     if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
   });
-  const res = await fetch(url.toString(), { method: "GET" });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || "API error");
+
+  let res;
+  try {
+    res = await fetch(url.toString(), {
+      method,
+      headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
+      body: method === "POST" ? JSON.stringify(payload || {}) : undefined,
+    });
+  } catch (e) {
+    throw new Error("無法連線到 API，請檢查網路或 Web App 權限（" + e.message + "）");
+  }
+
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch (e) {
+    const hint = text.slice(0, 160) || "（空白回應）";
+    const err = new Error("API 回應不是 JSON：" + hint);
+    err.httpStatus = res.status;
+    throw err;
+  }
+
+  if (!res.ok) {
+    const msg = json.error || json.message || res.statusText;
+    const err = new Error(msg);
+    err.httpStatus = res.status;
+    throw err;
+  }
+
+  if (json.ok === false || json.status === "error") {
+    const msg = json.message || json.error || "API 回傳錯誤";
+    const err = new Error(msg);
+    err.httpStatus = json.code || "";
+    throw err;
+  }
   return json;
 }
 
-async function apiPost(action, payload) {
-  const url = new URL(API_BASE);
-  url.searchParams.set("action", action);
-  const res = await fetch(url.toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {})
-  });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || "API error");
-  return json;
+function firstArrayCandidate(obj, paths) {
+  for (const path of paths) {
+    let cur = obj;
+    let ok = true;
+    for (const key of path) {
+      if (cur && Object.prototype.hasOwnProperty.call(cur, key)) {
+        cur = cur[key];
+      } else {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && Array.isArray(cur)) return cur;
+  }
+  return [];
+}
+
+function normalizeQuestionList(resp) {
+  const safeResp = resp ?? {};
+  const listSource = Array.isArray(safeResp)
+    ? safeResp
+    : firstArrayCandidate(safeResp, [
+        ["data"],
+        ["questions"],
+        ["items"],
+        ["data", "questions"],
+        ["data", "items"],
+      ]);
+
+  const normalized = listSource.map(normalizeQuestion);
+  const count =
+    safeResp.count ??
+    safeResp.total ??
+    safeResp.total_count ??
+    safeResp.data?.count ??
+    normalized.length;
+
+  return { items: normalized, count };
+}
+
+function normalizeQuestion(q) {
+  const optionsRaw = Array.isArray(q.options)
+    ? q.options
+    : String(q.options ?? q.choices ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  const questionId = q.question_id ?? q.q_id ?? q.id ?? q.uuid ?? "";
+
+  return {
+    ...q,
+    question_id: questionId,
+    stem: q.stem ?? q.question ?? q.title ?? "",
+    unit: q.unit ?? q.topic ?? q.category ?? "",
+    difficulty: q.difficulty ?? q.level ?? "",
+    options: optionsRaw,
+  };
 }
 
 function pickOne() {
@@ -120,9 +206,21 @@ function pickOne() {
 
 function renderList(items) {
   $("list").innerHTML = "";
-  $("count").textContent = `共 ${items.length} 題（目前顯示）`;
+  $("count").textContent = items.length
+    ? `共 ${items.length} 題（目前顯示）`
+    : "目前沒有符合條件的題目";
 
-  items.forEach(q => {
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "text-slate-400 text-sm";
+    empty.textContent = "目前沒有符合條件的題目。請調整篩選條件後再試一次。";
+    $("list").appendChild(empty);
+    $("quiz").classList.add("hidden");
+    $("quiz").innerHTML = "";
+    return;
+  }
+
+  items.forEach((q) => {
     const card = document.createElement("div");
     card.className = "p-4 border border-slate-800 rounded bg-slate-950/40";
     card.innerHTML = `
@@ -140,17 +238,22 @@ function renderList(items) {
 }
 
 function renderQuiz(q) {
-  current = q;
   const quiz = $("quiz");
   quiz.classList.remove("hidden");
 
-  const opts = String(q.options || "").split(",").map(s => s.trim()).filter(Boolean);
-  const optHtml = opts.map((op, i) => `
+  const opts = (Array.isArray(q.options) ? q.options : [])
+    .map((s) => String(s).trim())
+    .filter(Boolean);
+  const optHtml = opts
+    .map(
+      (op, i) => `
     <label class="flex gap-2 p-2 border border-slate-800 rounded cursor-pointer">
       <input type="radio" name="opt" value="${i}">
       <span>${escapeHtml(op)}</span>
     </label>
-  `).join("");
+  `
+    )
+    .join("");
 
   quiz.innerHTML = `
     <div class="text-xl font-semibold mb-3">${escapeHtml(q.stem || "")}</div>
@@ -176,23 +279,28 @@ function renderQuiz(q) {
 
   $("submit").onclick = async () => {
     const picked = quiz.querySelector('input[name="opt"]:checked');
-    if (!picked) return ($("result").textContent = "請先選一個答案");
+    if (!picked) {
+      $("result").textContent = "請先選一個答案";
+      return;
+    }
 
     try {
       $("result").textContent = "送出中…";
 
-      // 你後端若 action 名稱不同，把 "submitAnswer" 改成你的
-      const r = await apiPost("submitAnswer", {
-        user_id: $("user_id").value.trim(),
-        q_id: q.question_id,
-        chosen_answer: Number(picked.value)
+      const r = await callApi({
+        method: "POST",
+        action: "submitAnswer",
+        payload: {
+          user_id: $("user_id").value.trim(),
+          q_id: q.question_id,
+          chosen_answer: Number(picked.value),
+        },
       });
 
-      // 你後端回傳欄位若不同，這裡可調整
-      const ok = !!r.is_correct;
+      const ok = !!(r.is_correct ?? r.correct ?? r.ok);
       $("result").textContent = ok ? "✅ 答對了！" : "❌ 答錯了！";
     } catch (e) {
-      $("result").textContent = "送出失敗：" + e.message;
+      $("result").textContent = "送出失敗：" + formatError(e);
     }
   };
 }
@@ -200,42 +308,49 @@ function renderQuiz(q) {
 $("btnPing").onclick = async () => {
   try {
     setStatus("Ping 中…");
-    const r = await apiGet({ action: "ping" });
-    setStatus(`API OK：${r.message}（${r.ts}）`);
+    const r = await callApi({ method: "GET", query: { action: "ping" } });
+    const msg = r.message || r.status || "pong";
+    const ts = r.ts ? `（${r.ts}）` : "";
+    setStatus(`API OK：${msg}${ts}`);
   } catch (e) {
-    setStatus("Ping 失敗：" + e.message, true);
+    setStatus("Ping 失敗：" + formatError(e), true);
   }
 };
 
 $("btnLoad").onclick = async () => {
   try {
     setStatus("載入中…");
-    const r = await apiGet({
-      action: "getQuestions",
-      grade: $("grade").value.trim(),
-      unit: $("unit").value.trim(),
-      difficulty: $("difficulty").value.trim(),
-      limit: 100
+    const r = await callApi({
+      method: "GET",
+      query: {
+        action: "getQuestions",
+        grade: $("grade").value.trim(),
+        unit: $("unit").value.trim(),
+        difficulty: $("difficulty").value.trim(),
+        limit: 100,
+      },
     });
 
-    questions = Array.isArray(r.data) ? r.data : [];
+    const parsed = normalizeQuestionList(r);
+    questions = parsed.items;
     renderList(questions);
 
     if (questions.length) renderQuiz(pickOne());
-    setStatus(`載入成功：共 ${r.count ?? questions.length} 題`);
+    setStatus(`載入成功：共 ${parsed.count} 題`);
   } catch (e) {
-    setStatus("載入失敗：" + e.message, true);
+    setStatus("載入失敗：" + formatError(e), true);
+    renderList([]);
   }
 };
 
 // 防 XSS：把題目文字安全輸出
-function escapeHtml(s){
+function escapeHtml(s) {
   return String(s)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 </script>
 </body>
