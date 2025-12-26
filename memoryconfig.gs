@@ -14,6 +14,7 @@ const APP_CONFIG = {
 
   TIMEZONE: 'Asia/Taipei',
   TS_FORMAT: 'yyyy-MM-dd HH:mm:ss',
+  DATE_FORMAT: 'yyyy-MM-dd',
 
   // 出題上限預設
   DEFAULT_LIMIT: 100,
@@ -47,11 +48,23 @@ const APP_CONFIG = {
 };
 
 function nowTaipei_() {
-  return new Date(); // 以 GAS server time（UTC）表示，但我們寫入時會格式化成台北時區字串
+  return Utilities.formatDate(new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.TS_FORMAT);
+}
+
+function todayTaipei_() {
+  return Utilities.formatDate(new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.DATE_FORMAT);
 }
 
 function formatTaipeiTs_(dateObj) {
   return Utilities.formatDate(dateObj || new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.TS_FORMAT);
+}
+
+function parseTaipeiTimestamp_(ts) {
+  const m = String(ts || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const [_, y, mo, d, h, mi, se] = m;
+  const asUtc = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h) - 8, Number(mi), Number(se)));
+  return asUtc;
 }
 
 function addDays_(dateObj, days) {

@@ -118,8 +118,9 @@ class MemoryEngine {
       this.ui.setApiStatus(`API OK：pong（${json.ts_taipei || json.ts || ''}）`, 'ok');
       this._debug({ action: 'ping', url, response: json });
     } catch (e) {
-      this.ui.setApiStatus(`無法連線（${e.message || e}）`, 'bad');
-      this._debug({ action: 'ping', error: String(e.message || e) });
+      const msg = this._fmtError(e);
+      this.ui.setApiStatus(`無法連線（${msg}）`, 'bad');
+      this._debug({ action: 'ping', error: String(msg) });
     }
   }
 
@@ -170,8 +171,9 @@ class MemoryEngine {
       this._saveLocalSession();
 
     } catch (e) {
-      this.ui.setApiStatus(`載入失敗（${e.message || e}）`, 'bad');
-      this._debug({ action: 'getQuestions', error: String(e.message || e), params });
+      const msg = this._fmtError(e);
+      this.ui.setApiStatus(`載入失敗（${msg}）`, 'bad');
+      this._debug({ action: 'getQuestions', error: String(msg), params, detail: e });
     }
   }
 
@@ -187,13 +189,14 @@ class MemoryEngine {
 
     try {
       // 呼叫後端 submitAnswer
-      const body = {
+      const params = {
+        action: 'submitAnswer',
         user_id: this.state.user_id,
         q_id: q.question_id,
         chosen_answer: chosen,
       };
 
-      const { json, url } = await this.api.post('submitAnswer', body);
+      const { json, url } = await this.api.get(params);
 
       const isCorrect = !!json.is_correct;
       this.state.done += 1;
@@ -207,7 +210,7 @@ class MemoryEngine {
         need_remedial: !!json.need_remedial,
       });
 
-      this._debug({ action: 'submitAnswer', url, request: body, response: json });
+      this._debug({ action: 'submitAnswer', url, request: params, response: json });
 
       // 更新進度條
       this.ui.setProgress({
@@ -222,9 +225,10 @@ class MemoryEngine {
       }, 350);
 
     } catch (e) {
-      this.ui.showResult({ ok:false, msg: e.message || String(e) });
-      this._debug({ action: 'submitAnswer', error: String(e.message || e) });
-      this.ui.setApiStatus(`送出失敗（${e.message || e}）`, 'bad');
+      const msg = this._fmtError(e);
+      this.ui.showResult({ ok:false, msg });
+      this._debug({ action: 'submitAnswer', error: String(msg), detail: e });
+      this.ui.setApiStatus(`送出失敗（${msg}）`, 'bad');
     }
   }
 
@@ -307,5 +311,15 @@ class MemoryEngine {
     localStorage.removeItem(this.storageKey);
     this.ui.setApiStatus('已清除本機快取', 'ok');
     this._debug({ action: 'clearLocal' });
+  }
+
+  _fmtError(e) {
+    if (!e || typeof e !== 'object') return String(e);
+    const base = e.message || e.toString();
+    if (!e.type) return base;
+    if (e.type === 'network') return `network: ${base}`;
+    if (e.type === 'http') return `http ${e.status || ''}: ${base} ${e.body ? `body=${e.body}` : ''}`;
+    if (e.type === 'json') return `json parse: ${e.body || base}`;
+    return `${e.type}: ${base}`;
   }
 }

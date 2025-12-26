@@ -87,6 +87,12 @@ function getQuestionsByIds_(idSet) {
   return all.filter(q => idSet.has(q.question_id));
 }
 
+function getQuestionById_(qid) {
+  if (!qid) return null;
+  const all = getQuestionsAll_();
+  return all.find(q => q.question_id === qid) || null;
+}
+
 function pickRandom_(arr, n) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
