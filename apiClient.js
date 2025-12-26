@@ -80,24 +80,51 @@ class ApiClient {
     };
 
     if (method === 'POST') {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(bodyObj || {});
+      // 避免 preflight：使用 x-www-form-urlencoded
+      init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      const search = new URLSearchParams();
+      Object.entries(bodyObj || {}).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        search.set(k, v);
+      });
+      init.body = search.toString();
     }
 
     this._log('request', method, url, bodyObj || '');
 
-    const res = await this._withTimeout(fetch(url, init));
-    const text = await res.text();
+    let res;
+    try {
+      res = await this._withTimeout(fetch(url, init));
+    } catch (e) {
+      throw this._makeErr('network', `Network error / fetch failed: ${e.message || e}`, { url });
+    }
 
-    // 有些情況會回 HTML（部署/權限/錯誤頁），要能看見
+    let text = '';
+    try {
+      text = await res.text();
+    } catch (e) {
+      throw this._makeErr('network', `Network read failed: ${e.message || e}`, { url });
+    }
+
+    if (!res.ok) {
+      throw this._makeErr('http', `HTTP ${res.status} ${res.statusText || ''}`.trim(), {
+        status: res.status,
+        statusText: res.statusText,
+        body: text.slice(0, 200),
+        url,
+      });
+    }
+
     let json;
-    try { json = JSON.parse(text); } catch (e) {
-      throw new Error(`non-json response: ${text.slice(0, 180)}`);
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      throw this._makeErr('json', 'JSON parse error', { url, body: text.slice(0, 200) });
     }
 
     if (!json || json.ok === false) {
       const msg = json && (json.message || json.error) ? (json.message || json.error) : 'api error';
-      throw new Error(msg);
+      throw this._makeErr('api', msg, { url, body: text.slice(0, 200) });
     }
 
     return { json, url, raw: text };
@@ -127,5 +154,12 @@ class ApiClient {
       }
     }
     throw lastErr || new Error('Failed to fetch');
+  }
+
+  _makeErr(type, message, extra = {}) {
+    const err = new Error(message);
+    err.type = type;
+    Object.assign(err, extra);
+    return err;
   }
 }

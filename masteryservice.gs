@@ -28,6 +28,15 @@ function ensureMasterySheet_() {
   if (isEmpty) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
+  } else {
+    // 自動補齊缺少的欄位（不破壞原有資料）
+    const existing = firstRow.map(h => String(h || '').trim());
+    const missing = headers.filter(h => !existing.includes(h));
+    if (missing.length) {
+      const newHeaders = existing.slice();
+      missing.forEach(h => newHeaders.push(h));
+      sh.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
+    }
   }
 
   return sh;
@@ -77,93 +86,16 @@ function masteryLoadMap_(userId) {
   return { map, rowIndexByQid };
 }
 
-function parseTaipeiTsToDate_(ts) {
-  // ts 格式：yyyy-MM-dd HH:mm:ss
-  // 若空值，回傳 null
-  const s = String(ts || '').trim();
-  if (!s) return null;
-  // 用 new Date("YYYY-MM-DDTHH:mm:ss") 會被視為本機時區；GAS 端可能不是台北
-  // 所以我們只用於比較：改以字串轉成 Date(UTC) 可能不準
-  // ✅ 最穩：將 "yyyy-MM-dd HH:mm:ss" 轉成 Date 物件（以台北時間為基準）
-  // 簡化作法：把它當成台北時間，再減 8 小時變 UTC
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
-  if (!m) return null;
-  const [_, Y, Mo, D, h, mi, se] = m;
-  // 建立 UTC 時間 = 台北時間 - 8h
-  const utc = new Date(Date.UTC(
-    Number(Y),
-    Number(Mo) - 1,
-    Number(D),
-    Number(h) - 8,
-    Number(mi),
-    Number(se)
-  ));
-  return utc;
-}
-
 function isDue_(nextReviewAt, nowDate) {
   if (!nextReviewAt) return false;
-  const d = parseTaipeiTsToDate_(nextReviewAt);
+  const d = parseTaipeiTimestamp_(nextReviewAt);
   if (!d) return false;
   return d.getTime() <= nowDate.getTime();
 }
 
 function masteryPickQuestions_(userId, filters, limit) {
   const all = filterQuestions_(getQuestionsAll_(), filters);
-  const total = all.length;
-
-  const now = new Date(); // UTC-ish
-  const { map } = masteryLoadMap_(userId);
-
-  // 1) 到期題
-  const due = all.filter(q => {
-    const m = map.get(q.question_id);
-    return m && isDue_(m.next_review_at, now) && !m.mastered;
-  });
-
-  // 2) 低等級（<=2）題（但不一定到期）
-  const low = all.filter(q => {
-    const m = map.get(q.question_id);
-    return m && !m.mastered && Number(m.strength_level || 1) <= APP_CONFIG.PICK_RULES.LOW_LEVEL_MAX_LEVEL;
-  });
-
-  // 3) 新題（從未出現過）
-  const unseen = all.filter(q => !map.has(q.question_id));
-
-  // 4) 其他題（補隨機）
-  const others = all.filter(q => true);
-
-  const picked = [];
-  const want = Math.min(Number(limit || APP_CONFIG.DEFAULT_LIMIT), total);
-
-  function addUnique(list) {
-    for (const q of list) {
-      if (picked.length >= want) break;
-      if (!picked.some(x => x.question_id === q.question_id)) picked.push(q);
-    }
-  }
-
-  addUnique(due);
-  if (picked.length < want) addUnique(low);
-  if (picked.length < want) addUnique(unseen);
-
-  if (picked.length < want) {
-    const remain = others.filter(q => !picked.some(x => x.question_id === q.question_id));
-    addUnique(pickRandom_(remain, want - picked.length));
-  }
-
-  return {
-    ok: true,
-    count: total,
-    data: picked,
-    meta: {
-      picked: picked.length,
-      due: due.length,
-      low: low.length,
-      unseen: unseen.length,
-      totalFiltered: total,
-    }
-  };
+  return masteryPickQuestionsFromList_(userId, all, limit, new Date());
 }
 
 function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
@@ -171,7 +103,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
   const { map, rowIndexByQid } = masteryLoadMap_(userId);
 
   const qid = qObj.question_id;
-  const nowTs = formatTaipeiTs_(new Date());
+  const nowTs = nowTaipei_();
 
   const prev = map.get(qid) || {
     user_id: userId,
@@ -187,6 +119,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
 
   const strengthBefore = Number(prev.strength_level || 1);
   const totalAttempts = Number(prev.total_attempts || 0) + 1;
+  const isNew = !map.has(qid);
 
   let strengthAfter = strengthBefore;
   let mastered = !!prev.mastered;
@@ -194,7 +127,8 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
 
   if (isCorrect) {
     correctStreak += 1;
-    strengthAfter = Math.min(5, strengthBefore + 1);
+    // 新題目第一次答對仍維持 Level 1（符合驗收）；之後再答對才升級
+    strengthAfter = isNew ? 1 : Math.min(5, strengthBefore + 1);
 
     if (strengthAfter === 5 && APP_CONFIG.MARK_MASTERED_ON_LEVEL5_CORRECT) {
       mastered = true;
@@ -239,5 +173,86 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
     strength_after: strengthAfter,
     next_review_at: nextReviewAt,
     mastered: mastered,
+    last_answered_at: nowTs,
+    last_result: isCorrect ? 'correct' : 'wrong',
+    total_attempts: totalAttempts,
+    correct_streak: correctStreak,
+  };
+}
+
+function getUserMasteryMap(userId) {
+  return masteryLoadMap_(userId).map;
+}
+
+function updateAfterAnswer(userId, qObj, chosenAnswer, isCorrect) {
+  return masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect);
+}
+
+function pickQuestionsByMemory(userId, questions, now, limit) {
+  const list = Array.isArray(questions) ? questions : getQuestionsAll_();
+  return masteryPickQuestionsFromList_(userId, list, limit, now || new Date());
+}
+
+function masteryPickQuestionsFromList_(userId, questionList, limit, nowDate) {
+  const all = Array.isArray(questionList) ? questionList : [];
+  const total = all.length;
+  const now = nowDate || new Date();
+  const { map } = masteryLoadMap_(userId);
+
+  // 1) 到期題
+  const due = all.filter(q => {
+    const m = map.get(q.question_id);
+    return m && isDue_(m.next_review_at, now) && !m.mastered;
+  });
+
+  // 2) 低等級（<=2）題（但不一定到期）
+  const low = all.filter(q => {
+    const m = map.get(q.question_id);
+    return m && !m.mastered && Number(m.strength_level || 1) <= APP_CONFIG.PICK_RULES.LOW_LEVEL_MAX_LEVEL;
+  });
+
+  // 3) 新題（從未作答）
+  const unseen = all.filter(q => !map.has(q.question_id));
+
+  // 4) 其他題（補隨機）
+  const others = all.filter(q => true);
+  const dueSet = new Set(due.map(q => q.question_id));
+  const lowSet = new Set(low.map(q => q.question_id));
+  const unseenSet = new Set(unseen.map(q => q.question_id));
+
+  const picked = [];
+  const want = Math.min(Number(limit || APP_CONFIG.DEFAULT_LIMIT), total);
+
+  function addUnique(list) {
+    for (const q of list) {
+      if (picked.length >= want) break;
+      if (!picked.some(x => x.question_id === q.question_id)) picked.push(q);
+    }
+  }
+
+  addUnique(due);
+  if (picked.length < want) addUnique(low);
+  if (picked.length < want) addUnique(unseen);
+
+  if (picked.length < want) {
+    const remain = others.filter(q => !picked.some(x => x.question_id === q.question_id));
+    addUnique(pickRandom_(remain, want - picked.length));
+  }
+
+  const fillCount = picked.filter(q => !dueSet.has(q.question_id) && !lowSet.has(q.question_id) && !unseenSet.has(q.question_id)).length;
+
+  return {
+    ok: true,
+    count: total,
+    data: picked,
+    meta: {
+      picked: picked.length,
+      due: due.length,
+      weak: low.length,
+      new: unseen.length,
+      fill: fillCount,
+      totalFiltered: total,
+      now_taipei: nowTaipei_(),
+    }
   };
 }

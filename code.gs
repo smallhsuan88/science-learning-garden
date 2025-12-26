@@ -1,6 +1,6 @@
 /** code.gs
  * Web App 入口：doGet / doPost
- * Actions: ping, getQuestions, submitAnswer
+ * Actions: ping, getQuestions, submitAnswer, getLatestLog
  */
 
 function doGet(e) {
@@ -8,12 +8,17 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  // 盡量避免 preflight，仍保留 POST 但僅接受 form-urlencoded
   return handleRequest_(e, 'POST');
+}
+
+function doOptions(e) {
+  return buildCorsResponse_({});
 }
 
 function handleRequest_(e, method) {
   try {
-    const params = (e && e.parameter) ? e.parameter : {};
+    const params = normalizeParams_(e, method);
     const action = String(params.action || '').trim();
 
     if (!action) {
@@ -21,7 +26,7 @@ function handleRequest_(e, method) {
     }
 
     if (action === 'ping') {
-      return jsonOk_({ ok: true, message: 'pong', ts: new Date().toISOString(), ts_taipei: formatTaipeiTs_(new Date()) });
+      return jsonOk_({ ok: true, message: 'pong', ts: new Date().toISOString(), ts_taipei: nowTaipei_() });
     }
 
     if (action === 'getQuestions') {
@@ -39,18 +44,16 @@ function handleRequest_(e, method) {
     }
 
     if (action === 'submitAnswer') {
-      const body = parseJsonBody_(e);
-      const user_id = String(body.user_id || params.user_id || 'u001').trim();
-      const q_id = String(body.q_id || '').trim();
-      const chosen_answer = Number(body.chosen_answer);
+      const user_id = String(params.user_id || 'u001').trim();
+      const q_id = String(params.q_id || '').trim();
+      const chosen_answer = Number(params.chosen_answer);
 
       if (!q_id || Number.isNaN(chosen_answer)) {
         return jsonError_('missing q_id or chosen_answer');
       }
 
       // 找題目
-      const all = getQuestionsAll_();
-      const q = all.find(x => x.question_id === q_id);
+      const q = getQuestionById_(q_id);
       if (!q) return jsonError_('question not found: ' + q_id);
 
       const answerKey = Number(q.answer_key);
@@ -61,7 +64,7 @@ function handleRequest_(e, method) {
 
       // 寫入 Logs
       const logOk = appendLog_({
-        ts_taipei: formatTaipeiTs_(new Date()),
+        ts_taipei: nowTaipei_(),
         user_id,
         q_id,
         grade: q.grade,
@@ -89,8 +92,14 @@ function handleRequest_(e, method) {
         recorded: !!logOk,
         need_remedial: needRemedial,
         mastery,
-        ts_taipei: formatTaipeiTs_(new Date()),
+        ts_taipei: nowTaipei_(),
       });
+    }
+
+    if (action === 'getLatestLog') {
+      const user_id = String(params.user_id || 'u001').trim();
+      const latest = getLatestLog_(user_id);
+      return jsonOk_({ ok: true, latest, ts_taipei: nowTaipei_() });
     }
 
     return jsonError_('unknown action: ' + action);
@@ -100,26 +109,46 @@ function handleRequest_(e, method) {
   }
 }
 
-function parseJsonBody_(e) {
-  try {
-    if (!e || !e.postData || !e.postData.contents) return {};
-    return JSON.parse(e.postData.contents);
-  } catch (e2) {
-    return {};
-  }
-}
-
 function jsonOk_(obj) {
   const out = obj || {};
   if (out.ok === undefined) out.ok = true;
-  return ContentService
-    .createTextOutput(JSON.stringify(out))
-    .setMimeType(ContentService.MimeType.JSON);
+  return buildCorsResponse_(out);
 }
 
 function jsonError_(message, code) {
   const out = { ok: false, message: String(message || 'error'), code: code || 400 };
-  return ContentService
-    .createTextOutput(JSON.stringify(out))
+  return buildCorsResponse_(out, code || 400);
+}
+
+function normalizeParams_(e, method) {
+  const params = (e && e.parameter) ? Object.assign({}, e.parameter) : {};
+
+  if (method === 'POST' && e && e.postData) {
+    const ctype = (e.postData.type || '').toLowerCase();
+    if (ctype.includes('application/json')) {
+      try {
+        const bodyObj = JSON.parse(e.postData.contents || '{}');
+        Object.assign(params, bodyObj);
+      } catch (_) { }
+    } else {
+      // application/x-www-form-urlencoded already merged into e.parameter
+    }
+  }
+  return params;
+}
+
+function buildCorsResponse_(payload, status) {
+  const text = JSON.stringify(payload || {});
+  const output = ContentService.createTextOutput(text)
     .setMimeType(ContentService.MimeType.JSON);
+
+  if (output.setHeader) {
+    output.setHeader('Access-Control-Allow-Origin', '*');
+    output.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (status && output.setResponseCode) {
+    output.setResponseCode(status);
+  }
+  return output;
 }

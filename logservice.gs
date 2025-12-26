@@ -38,7 +38,7 @@ function ensureLogsSheet_() {
 function appendLog_(logObj) {
   const sh = ensureLogsSheet_();
   const row = [
-    logObj.ts_taipei || formatTaipeiTs_(new Date()),
+    logObj.ts_taipei || nowTaipei_(),
     logObj.user_id || '',
     logObj.q_id || '',
     logObj.grade ?? '',
@@ -55,4 +55,32 @@ function appendLog_(logObj) {
   ];
   sh.appendRow(row);
   return true;
+}
+
+function getLatestLog_(userId) {
+  const sh = ensureLogsSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(h => String(h || '').trim());
+  const idx = (name) => headers.indexOf(name);
+
+  const iUser = idx('user_id');
+  const iTs = idx('ts_taipei');
+  const iQid = idx('q_id');
+  const iCorrect = idx('is_correct');
+
+  for (let r = values.length - 1; r >= 1; r--) {
+    const row = values[r];
+    if (String(row[iUser] || '').trim() !== String(userId || '').trim()) continue;
+    return {
+      ts_taipei: row[iTs] || '',
+      user_id: row[iUser] || '',
+      q_id: row[iQid] || '',
+      is_correct: String(row[iCorrect] || '').toUpperCase() === 'TRUE',
+      row_index: r + 1,
+    };
+  }
+  return null;
 }
