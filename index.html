@@ -4,855 +4,194 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Science Learning Garden</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{
+      color-scheme: dark;
+      --bg:#070b1a;
+      --panel:#0c1430;
+      --panel2:#0b122a;
+      --text:#e9f0ff;
+      --muted:#9fb0d0;
+      --line:rgba(255,255,255,.10);
+      --good:#18c06a;
+      --bad:#ff4d5e;
+      --warn:#ffb020;
+      --btn:#233055;
+      --btn2:#2c3b68;
+      --accent:#25d18c;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius:18px;
+    }
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 20% 10%, #12214f 0%, rgba(18,33,79,0) 55%), var(--bg); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC","Microsoft JhengHei",sans-serif;}
+    a{color:#b7d2ff; text-decoration:none;}
+    a:hover{text-decoration:underline;}
+    .wrap{max-width:1050px; margin:28px auto; padding:0 18px;}
+    .title{display:flex; align-items:center; gap:10px; margin-bottom:6px;}
+    .title h1{font-size:44px; line-height:1.05; margin:0;}
+    .sub{color:var(--muted); font-size:18px; margin:0 0 18px;}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px;}
+    .row{display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;}
+    .field{flex:1; min-width:180px;}
+    label{display:block; color:var(--muted); font-size:14px; margin:0 0 6px;}
+    input,select,textarea{width:100%; box-sizing:border-box; border-radius:14px; border:1px solid var(--line); background:rgba(0,0,0,.25); color:var(--text); padding:12px 12px; font-size:16px; outline:none;}
+    input::placeholder{color:rgba(200,220,255,.35);}
+    .btn{border:1px solid var(--line); background:var(--btn); color:var(--text); padding:12px 14px; border-radius:14px; cursor:pointer; font-size:16px;}
+    .btn:hover{background:var(--btn2);}
+    .btn.primary{background:#0c7f55; border-color:rgba(50,255,170,.25);}
+    .btn.primary:hover{background:#0aa36a;}
+    .btn.warn{background:#7a5200; border-color:rgba(255,176,32,.35);}
+    .btn.warn:hover{background:#996700;}
+    .btn.ghost{background:transparent;}
+    .btn.small{padding:10px 12px; font-size:14px;}
+    .pill{display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(0,0,0,.25); color:var(--muted); font-size:13px;}
+    .pill b{color:var(--text);}
+    .grid2{display:grid; grid-template-columns:1.1fr .9fr; gap:14px; margin-top:14px;}
+    @media (max-width: 920px){ .grid2{grid-template-columns:1fr;} }
+
+    .statusLine{margin-top:10px; color:var(--muted); display:flex; flex-wrap:wrap; gap:10px; align-items:center;}
+    .statusLine .ok{color:var(--good);}
+    .statusLine .bad{color:var(--bad);}
+    .statusLine .warn{color:var(--warn);}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;}
+
+    .progressBox{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+    .bar{flex:1; min-width:220px; height:12px; border-radius:999px; border:1px solid var(--line); background:rgba(255,255,255,.06); overflow:hidden;}
+    .bar > i{display:block; height:100%; width:0%; background:linear-gradient(90deg, #22d38d, #5af2b5);}
+
+    .qCard{margin-top:14px;}
+    .qTitle{font-size:28px; margin:0 0 10px;}
+    .opt{display:flex; gap:10px; align-items:center; padding:12px 12px; border-radius:14px; border:1px solid var(--line); background:rgba(0,0,0,.22); margin-bottom:10px; cursor:pointer;}
+    .opt:hover{background:rgba(0,0,0,.33);}
+    .opt input{width:auto; margin:0;}
+    .actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;}
+    details{margin-top:10px;}
+    summary{cursor:pointer; color:var(--muted);}
+    .explain{margin-top:8px; padding:12px; border-radius:14px; border:1px solid var(--line); background:rgba(0,0,0,.22); color:var(--text);}
+
+    .list{margin-top:14px;}
+    .item{border:1px solid var(--line); background:rgba(0,0,0,.20); border-radius:16px; padding:14px; margin-bottom:12px;}
+    .itemTop{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;}
+    .meta{color:var(--muted); font-size:14px;}
+    .right{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    .tag{font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted);}
+    .foot{margin-top:16px; color:var(--muted); font-size:13px;}
+    .hr{height:1px; background:var(--line); margin:12px 0;}
+    .kbd{border:1px solid var(--line); padding:2px 8px; border-radius:8px; font-size:12px; background:rgba(0,0,0,.25); color:var(--muted);}
+  </style>
 </head>
 
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  <div class="max-w-5xl mx-auto p-6">
+<body>
+  <div class="wrap">
+    <div class="title">
+      <div style="font-size:34px;">🌱</div>
+      <h1>Science Learning Garden</h1>
+    </div>
+    <p class="sub">GitHub Pages 前端 × Google Apps Script API × Google Sheet 題庫</p>
 
-    <header class="mb-6">
-      <h1 class="text-2xl font-semibold">🌱 Science Learning Garden</h1>
-      <p class="text-slate-300 mt-2">GitHub Pages 前端 × Google Apps Script API × Google Sheet 題庫</p>
-    </header>
-
-    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
-      <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
-        <div class="md:col-span-2">
-          <label class="block text-sm text-slate-300 mb-1">使用者 ID</label>
-          <input id="user_id" value="u001"
-                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
+    <div class="card" id="configCard">
+      <div class="row">
+        <div class="field" style="min-width:220px;">
+          <label>使用者 ID</label>
+          <input id="userId" placeholder="例如 u001" value="u001" />
+        </div>
+        <div class="field">
+          <label>年級 (grade)</label>
+          <input id="grade" placeholder="例如 1 / 2 / 3" />
+        </div>
+        <div class="field">
+          <label>單元 (unit)</label>
+          <input id="unit" placeholder="例如 植物的構造" />
+        </div>
+        <div class="field">
+          <label>難度 (difficulty)</label>
+          <input id="difficulty" placeholder="例如 Easy / Normal" />
         </div>
 
-        <div>
-          <label class="block text-sm text-slate-300 mb-1">年級 (grade)</label>
-          <input id="grade" placeholder="例如 1 / 2 / 3"
-                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
-        </div>
-
-        <div>
-          <label class="block text-sm text-slate-300 mb-1">單元 (unit)</label>
-          <input id="unit" placeholder="例如 植物的構造"
-                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
-        </div>
-
-        <div>
-          <label class="block text-sm text-slate-300 mb-1">難度 (difficulty)</label>
-          <!-- ✅ 預設空白，避免一開始就把題目篩光 -->
-          <input id="difficulty" placeholder="例如 Easy / Normal / Hard（可留空）"
-                 class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800" />
-        </div>
-
-        <div class="flex items-end gap-2">
-          <button id="btnPing"
-            class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">
-            Ping API
-          </button>
-          <button id="btnLoad"
-            class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-medium">
-            載入題目
-          </button>
-          <button id="btnLoadAll"
-            class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 font-medium text-slate-900">
-            載入全部（忽略篩選）
-          </button>
+        <div class="right">
+          <button class="btn" id="btnPing">Ping API</button>
+          <button class="btn primary" id="btnLoad">載入題目</button>
+          <button class="btn warn" id="btnLoadAll">載入全部（忽略篩選）</button>
         </div>
       </div>
 
-      <div class="mt-3 flex flex-wrap gap-2">
-        <button id="btnRefreshStable"
-          class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">
-          重新取得穩定入口
-        </button>
-        <button id="btnClearCache"
-          class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">
-          清除 API 快取
-        </button>
+      <div class="statusLine" id="statusLine">
+        <span class="pill">API：<b id="apiLabel" class="mono">（未設定）</b></span>
+        <span class="pill">狀態：<b id="apiStatus">尚未連線</b></span>
+        <span class="pill">本機 Session：<b id="sessionLabel">未開始</b></span>
       </div>
 
-      <div id="status" class="mt-3 text-sm text-slate-300"></div>
+      <div class="hr"></div>
 
-      <div class="mt-2 text-xs text-slate-400 break-all space-y-1">
-        <div>API_BASE（實際呼叫用）：<span id="apiBaseText"></span></div>
-        <div>FALLBACK_EXEC（備援）：<span id="execText"></span></div>
-        <div>最近一次請求：<span id="lastReq"></span></div>
+      <div class="row">
+        <button class="btn small" id="btnStable">重新取得穩定入口</button>
+        <button class="btn small ghost" id="btnClearCache">清除本機快取</button>
+        <button class="btn small" id="btnFinish">完成本次</button>
+        <button class="btn small warn" id="btnRestart">重新開始（清除記憶）</button>
+
+        <span class="pill">快捷鍵：<span class="kbd">Enter</span> 送出，<span class="kbd">N</span> 下一題</span>
       </div>
-    </section>
 
-    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
-      <h2 class="text-lg font-semibold mb-2">Debug</h2>
-      <div class="text-xs text-slate-300 space-y-2">
-        <div>
-          <div class="font-medium text-slate-200">Sanitized Query</div>
-          <pre id="debugQuery" class="mt-1 whitespace-pre-wrap break-words bg-slate-950/60 rounded p-2 border border-slate-800 text-slate-300">（尚未送出查詢）</pre>
-        </div>
-        <div>
-          <div class="font-medium text-slate-200">lastRequestUrl</div>
-          <div id="debugLastRequestUrl" class="mt-1 break-all text-slate-400">（尚未送出請求）</div>
-        </div>
-        <div>
-          <div class="font-medium text-slate-200">rawResponsePreview（前 300 字）</div>
-          <pre id="debugRaw" class="mt-1 whitespace-pre-wrap break-words bg-slate-950/60 rounded p-2 border border-slate-800 text-slate-300">（尚未送出請求）</pre>
-        </div>
-        <div>
-          <div class="font-medium text-slate-200">parsedCount</div>
-          <div id="debugParsedCount" class="mt-1 text-slate-400">（尚未解析）</div>
-        </div>
-        <div>
-          <div class="font-medium text-slate-200">written_to_spreadsheet_id</div>
-          <div id="debugSheetId" class="mt-1 break-all text-slate-400">（尚未寫入）</div>
-        </div>
+      <div class="foot">
+        Google Sheet：
+        <a href="https://docs.google.com/spreadsheets/d/1vYlmGr_tSj3MKAbnRtnOSDgBv_j8cAbDkATtW4ammaM/edit?gid=1813061438#gid=1813061438" target="_blank" rel="noreferrer">開啟</a>
+        ｜ GAS WebApp：
+        <a href="https://script.google.com/macros/s/AKfycbya27B-Xrr1nZzwT6c2eWNrPjMLbuc1nKF70ikVqGtaiZn7XQ5B37uhuyDZ6tWOk6Kh/exec" target="_blank" rel="noreferrer">開啟</a>
       </div>
-    </section>
-
-    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6">
-      <div class="flex flex-wrap items-center gap-3 justify-between">
-        <div class="space-y-1 text-sm text-slate-200">
-          <div>總題數：<span id="progressTotal">-</span></div>
-          <div>本次已完成：<span id="progressSession">0</span></div>
-          <div>累積已完成：<span id="progressLifetime">-</span></div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button id="btnSaveProgress" class="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-sm">完成本次（保存進度）</button>
-          <button id="btnResetProgress" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">重新開始（清空進度）</button>
-        </div>
-      </div>
-      <div id="progressHint" class="text-xs text-slate-400 mt-2"></div>
-    </section>
-
-    <!-- Quiz -->
-    <section id="quiz" class="hidden bg-slate-900/60 border border-slate-800 rounded-xl p-4 mb-6"></section>
-
-    <!-- List -->
-    <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">題目清單</h2>
-        <div id="count" class="text-sm text-slate-300"></div>
-      </div>
-      <div id="list" class="mt-3 space-y-3"></div>
-    </section>
-  </div>
-
-<script>
-/* =========================================================
-   ✅ 設定 API 入口：先 googleusercontent、再 exec 備援
-========================================================= */
-const API_GOOGLEUSERCONTENT_BASE = "";
-const API_EXEC_FALLBACK = "https://script.google.com/macros/s/AKfycbya27B-Xrr1nZzwT6c2eWNrPjMLbuc1nKF70ikVqGtaiZn7XQ5B37uhuyDZ6tWOk6Kh/exec";
-/* ========================================================= */
-
-const LS_KEY = "SLG_API_BASE_STABLE_V1";
-
-const $ = (id) => document.getElementById(id);
-
-$("execText").textContent = API_EXEC_FALLBACK;
-
-let API_BASE = API_GOOGLEUSERCONTENT_BASE || "";        // 會自動取得穩定入口（googleusercontent）
-let questions = [];
-const debugState = {
-  sanitizedQuery: "（尚未送出查詢）",
-  lastRequestUrl: "（尚未送出請求）",
-  rawResponsePreview: "（尚未送出請求）",
-  parsedCount: "（尚未解析）",
-  writtenSheetId: "（尚未寫入）",
-};
-let progressState = { doneIds: [], updated_at: "" };
-let lifetimeDone = 0;
-let totalCountFromApi = 0;
-
-function setStatus(msg, isError = false) {
-  $("status").textContent = msg;
-  $("status").className = "mt-3 text-sm " + (isError ? "text-rose-300" : "text-slate-300");
-}
-
-function formatError(err) {
-  if (!err) return "未知錯誤";
-  if (err.httpStatus) return `HTTP ${err.httpStatus}：${err.message}`;
-  return err.message || String(err);
-}
-
-function setApiBaseText() {
-  $("apiBaseText").textContent = API_BASE || API_GOOGLEUSERCONTENT_BASE || "（尚未取得）";
-}
-
-function updateDebugDisplay(overrides = {}) {
-  Object.assign(debugState, overrides);
-  $("debugQuery").textContent = debugState.sanitizedQuery;
-  $("debugLastRequestUrl").textContent = debugState.lastRequestUrl;
-  $("debugRaw").textContent = debugState.rawResponsePreview;
-  $("debugParsedCount").textContent = debugState.parsedCount;
-  if ($("debugSheetId")) $("debugSheetId").textContent = debugState.writtenSheetId || "（尚未寫入）";
-}
-
-function summarizeParsedCount(json) {
-  const count = json?.count ?? json?.total ?? json?.total_count ?? json?.data?.count ?? "";
-  const arrays = [
-    json?.data,
-    json?.questions,
-    json?.items,
-    json?.data?.questions,
-    json?.data?.items,
-  ];
-  const dataLength = arrays.find((a) => Array.isArray(a))?.length ?? "";
-  return `count=${count || "（無）"}，data.length=${dataLength || "（無）"}`;
-}
-
-function sanitizeFilterValue(input) {
-  const trimmed = String(input ?? "").trim();
-  if (!trimmed) return "";
-  if (/^例如/i.test(trimmed)) return "";
-  return trimmed;
-}
-
-function sanitizeDifficulty(input) {
-  const trimmed = sanitizeFilterValue(input);
-  if (!trimmed) return "";
-  if (trimmed.includes("/") && (/例如/i.test(trimmed) || /easy\s*\/\s*normal|normal\s*\/\s*hard/i.test(trimmed))) {
-    return "";
-  }
-  return trimmed;
-}
-
-function getUserId() {
-  return $("user_id").value.trim() || "guest";
-}
-
-function getProgressKey() {
-  return `slg_progress_${getUserId()}`;
-}
-
-function loadProgress() {
-  try {
-    const raw = localStorage.getItem(getProgressKey());
-    if (!raw) return { doneIds: [], updated_at: "" };
-    const parsed = JSON.parse(raw);
-    return {
-      doneIds: Array.isArray(parsed.done_ids) ? parsed.done_ids.map(String) : Array.isArray(parsed.doneIds) ? parsed.doneIds.map(String) : [],
-      updated_at: parsed.updated_at || ""
-    };
-  } catch (_) {
-    return { doneIds: [], updated_at: "" };
-  }
-}
-
-function saveProgress() {
-  progressState.updated_at = new Date().toISOString();
-  localStorage.setItem(getProgressKey(), JSON.stringify({
-    done_ids: progressState.doneIds,
-    updated_at: progressState.updated_at,
-  }));
-  updateProgressUI();
-}
-
-function resetProgress() {
-  progressState = { doneIds: [], updated_at: "" };
-  localStorage.removeItem(getProgressKey());
-  updateProgressUI();
-}
-
-function updateProgressUI() {
-  $("progressTotal").textContent = totalCountFromApi || "-";
-  $("progressSession").textContent = progressState.doneIds.length;
-  $("progressLifetime").textContent = (lifetimeDone || lifetimeDone === 0) ? lifetimeDone : "-";
-
-  const remaining = totalCountFromApi ? Math.max(totalCountFromApi - progressState.doneIds.length, 0) : 0;
-  if (remaining === 0 && totalCountFromApi > 0) {
-    $("progressHint").textContent = "全部題目都完成了！可按「重新開始」清空進度。";
-  } else {
-    $("progressHint").textContent = remaining > 0 ? `尚有 ${remaining} 題未作答，系統會優先出未做過的題目。` : "";
-  }
-}
-
-function ensureProgressLoaded() {
-  progressState = loadProgress();
-  updateProgressUI();
-}
-
-function markQuestionDone(qId) {
-  const id = String(qId || "");
-  if (!id) return;
-  if (!progressState.doneIds.includes(id)) {
-    progressState.doneIds.push(id);
-    saveProgress();
-    if (questions.length) renderList(questions);
-  } else {
-    updateProgressUI();
-  }
-}
-
-async function refreshLifetimeProgress() {
-  try {
-    const r = await callApi({
-      method: "GET",
-      query: { action: "getUserProgress", user_id: getUserId() },
-      skipDebug: true,
-    });
-    lifetimeDone = Number(r.logs_count || 0);
-    updateProgressUI();
-  } catch (_) {
-    // 靜默忽略，debug 區塊已可查詢 raw response
-  }
-}
-
-async function ensureStableBase({ force = false } = {}) {
-  if (!force && API_BASE && API_BASE.startsWith("https://script.googleusercontent.com/")) {
-    setApiBaseText();
-    return API_BASE;
-  }
-
-  if (!force && API_GOOGLEUSERCONTENT_BASE) {
-    API_BASE = API_GOOGLEUSERCONTENT_BASE;
-    localStorage.setItem(LS_KEY, API_BASE);
-    setApiBaseText();
-    return API_BASE;
-  }
-
-  if (!force) {
-    const cached = localStorage.getItem(LS_KEY);
-    if (cached && cached.startsWith("https://script.googleusercontent.com/")) {
-      API_BASE = cached;
-      setApiBaseText();
-      return API_BASE;
-    }
-  }
-
-  // 透過 redirect 自動抓到 googleusercontent 的最終 URL
-  setStatus("取得穩定入口中…");
-  const url = new URL(API_EXEC_FALLBACK);
-  url.searchParams.set("action", "ping");
-  url.searchParams.set("_", String(Date.now())); // 防 cache
-
-  let res;
-  try {
-    res = await fetch(url.toString(), { method: "GET", redirect: "follow" });
-  } catch (e) {
-    throw new Error("無法連線到 API_EXEC_FALLBACK（請確認部署為『誰都可存取』）： " + e.message);
-  }
-
-  // fetch 追完 redirect 後，res.url 就會是 googleusercontent 的穩定入口
-  const finalUrl = res.url || "";
-  if (finalUrl.startsWith("https://script.googleusercontent.com/")) {
-    // ✅ 用 finalUrl 當 API_BASE，但要把 query 清乾淨，只留 base
-    API_BASE = finalUrl.split("?")[0] + "?" + (finalUrl.split("?")[1] ? finalUrl.split("?")[1].split("&").filter(s => s.startsWith("user_content_key=") || s.startsWith("lib=")).join("&") : "");
-    localStorage.setItem(LS_KEY, API_BASE);
-    setApiBaseText();
-    setStatus("✅ 已取得穩定入口");
-    return API_BASE;
-  }
-
-  // 未取得 googleusercontent：維持 google 入口為空，後續呼叫會改用 exec 備援
-  API_BASE = "";
-  setApiBaseText();
-  setStatus("⚠️ 未取得 googleusercontent，後續將改用 exec 備援", true);
-  return API_BASE;
-}
-
-async function callApiWithBase(base, { method = "GET", action, query = {}, payload, skipDebug = false } = {}) {
-  if (!base) {
-    throw new Error("缺少 API base URL");
-  }
-
-  const url = new URL(base);
-  if (action) url.searchParams.set("action", action);
-
-  if (method === "GET" && !query._) {
-    query._ = Date.now();
-  }
-
-  Object.entries(query).forEach(([k, v]) => {
-    if (v !== "" && v !== undefined && v !== null) url.searchParams.set(k, v);
-  });
-
-  const finalUrl = url.toString();
-  if (!skipDebug) {
-    $("lastReq").textContent = finalUrl;
-    updateDebugDisplay({ lastRequestUrl: finalUrl });
-  }
-
-  let res;
-  try {
-    res = await fetch(finalUrl, {
-      method,
-      headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
-      body: method === "POST" ? JSON.stringify(payload || {}) : undefined,
-    });
-  } catch (e) {
-    throw new Error("無法連線到 API（" + e.message + "）");
-  }
-
-  const text = await res.text();
-  if (!skipDebug) {
-    updateDebugDisplay({ rawResponsePreview: text.slice(0, 300) || "（空白回應）" });
-  }
-  let json;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch (e) {
-    const hint = text.slice(0, 200) || "（空白回應）";
-    const err = new Error("API 回應不是 JSON：" + hint);
-    err.httpStatus = res.status;
-    throw err;
-  }
-
-  if (!res.ok) {
-    const msg = json.error || json.message || res.statusText;
-    const err = new Error(msg);
-    err.httpStatus = res.status;
-    throw err;
-  }
-
-  if (json.ok === false || json.status === "error") {
-    const msg = json.message || json.error || "API 回傳錯誤";
-    const err = new Error(msg);
-    err.httpStatus = json.code || "";
-    throw err;
-  }
-
-  if (!skipDebug) {
-    updateDebugDisplay({ parsedCount: summarizeParsedCount(json) });
-  }
-  return json;
-}
-
-async function callApi(args) {
-  const { skipExecFallback = false, skipDebug = false, ...rest } = args || {};
-
-  // 先確保有 API_BASE（googleusercontent），若沒有會在需要時使用 exec 備援
-  if (!API_BASE) await ensureStableBase();
-
-  const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE;
-  let primaryError = primaryBase ? null : new Error("尚未設定 googleusercontent 入口");
-
-  if (primaryBase) {
-    try {
-      return await callApiWithBase(primaryBase, { ...rest, skipDebug });
-    } catch (e) {
-      primaryError = e;
-    }
-  }
-
-  if (skipExecFallback) {
-    if (primaryError) throw primaryError;
-    throw new Error("無法取得 googleusercontent 入口，請稍後再試");
-  }
-
-  setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(primaryError), true);
-  return await callApiWithBase(API_EXEC_FALLBACK, { ...rest, skipDebug });
-}
-
-async function fetchQuestionsWithFallback(query) {
-  await ensureStableBase();
-
-  const primaryBase = API_BASE || API_GOOGLEUSERCONTENT_BASE;
-  let usedExec = false;
-  let r1;
-
-  try {
-    if (!primaryBase) throw new Error("缺少穩定入口");
-    r1 = await callApiWithBase(primaryBase, { method: "GET", query });
-  } catch (e) {
-    usedExec = true;
-    setStatus("⚠️ 穩定入口失敗，改用 exec 備援：" + formatError(e), true);
-    r1 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-  }
-
-  const parsed1 = normalizeQuestionList(r1);
-
-  if (parsed1.count === 0 && !usedExec) {
-    const r2 = await callApiWithBase(API_EXEC_FALLBACK, { method: "GET", query });
-    const parsed2 = normalizeQuestionList(r2);
-    return { parsed: parsed2, usedExec: true, primaryCount: parsed1.count };
-  }
-
-  return { parsed: parsed1, usedExec };
-}
-
-function firstArrayCandidate(obj, paths) {
-  for (const path of paths) {
-    let cur = obj;
-    let ok = true;
-    for (const key of path) {
-      if (cur && Object.prototype.hasOwnProperty.call(cur, key)) {
-        cur = cur[key];
-      } else {
-        ok = false;
-        break;
-      }
-    }
-    if (ok && Array.isArray(cur)) return cur;
-  }
-  return [];
-}
-
-function normalizeQuestionList(resp) {
-  const safeResp = resp ?? {};
-  const listSource = Array.isArray(safeResp)
-    ? safeResp
-    : firstArrayCandidate(safeResp, [
-        ["data"],
-        ["questions"],
-        ["items"],
-        ["data", "questions"],
-        ["data", "items"],
-      ]);
-
-  const normalized = listSource.map(normalizeQuestion);
-  const count =
-    safeResp.count ??
-    safeResp.total ??
-    safeResp.total_count ??
-    safeResp.data?.count ??
-    normalized.length;
-
-  return { items: normalized, count };
-}
-
-function normalizeQuestion(q) {
-  const optionsRaw = Array.isArray(q.options)
-    ? q.options
-    : String(q.options ?? q.choices ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-  const questionId = q.question_id ?? q.q_id ?? q.id ?? q.uuid ?? "";
-
-  return {
-    ...q,
-    question_id: questionId,
-    stem: q.stem ?? q.question ?? q.title ?? "",
-    unit: q.unit ?? q.topic ?? q.category ?? "",
-    difficulty: q.difficulty ?? q.level ?? "",
-    options: optionsRaw,
-  };
-}
-
-function pickOne() {
-  if (!questions.length) return null;
-  return questions[Math.floor(Math.random() * questions.length)];
-}
-
-function pickNextQuestionPreferFresh() {
-  const undone = questions.filter(q => !progressState.doneIds.includes(String(q.question_id)));
-  if (undone.length) return undone[Math.floor(Math.random() * undone.length)];
-  return pickOne();
-}
-
-function handleLoadedQuestions(parsed, { usedExec = false } = {}) {
-  questions = parsed.items;
-  totalCountFromApi = parsed.count || parsed.items.length || 0;
-  ensureProgressLoaded();
-  refreshLifetimeProgress();
-  updateProgressUI();
-  renderList(questions);
-  if (questions.length) {
-    const next = pickNextQuestionPreferFresh();
-    renderQuiz(next);
-  } else {
-    renderQuiz(null);
-  }
-
-  const suffix = usedExec ? "（使用 exec 備援）" : "";
-  if (questions.length) {
-    setStatus(`載入成功：後端回傳 ${parsed.count} 題，前端顯示 ${questions.length} 題${suffix}`);
-  } else {
-    setStatus(`載入結果為 0 題${suffix}`, true);
-  }
-}
-
-function renderList(items) {
-  $("list").innerHTML = "";
-  const undone = items.filter((q) => !progressState.doneIds.includes(String(q.question_id)));
-  $("count").textContent = items.length
-    ? `共 ${items.length} 題（目前顯示），未做過 ${undone.length} 題`
-    : "目前沒有符合條件的題目";
-
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "text-slate-400 text-sm";
-    empty.textContent = "目前沒有符合條件的題目。請先把篩選條件留空試試，或確認 GAS 回傳的 difficulty 值。";
-    $("list").appendChild(empty);
-    $("quiz").classList.add("hidden");
-    $("quiz").innerHTML = "";
-    return;
-  }
-
-  items.forEach((q) => {
-    const card = document.createElement("div");
-    card.className = "p-4 border border-slate-800 rounded bg-slate-950/40";
-    card.innerHTML = `
-      <div class="font-semibold">${escapeHtml(q.stem || "")}</div>
-      <div class="text-sm text-slate-300 mt-1">
-        年級 ${escapeHtml(String(q.grade ?? ""))}｜${escapeHtml(q.unit || "")}｜${escapeHtml(q.difficulty || "")}
-      </div>
-      <div class="mt-2 flex items-center gap-2">
-        <button class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-          作答
-        </button>
-        ${progressState.doneIds.includes(String(q.question_id)) ? '<span class="text-xs text-emerald-300">已完成</span>' : ""}
-      </div>
-    `;
-    card.querySelector("button").onclick = () => renderQuiz(q);
-    $("list").appendChild(card);
-  });
-}
-
-function renderQuiz(q) {
-  if (!q) {
-    $("quiz").classList.add("hidden");
-    $("quiz").innerHTML = "";
-    return;
-  }
-
-  const quiz = $("quiz");
-  quiz.classList.remove("hidden");
-
-  const opts = (Array.isArray(q.options) ? q.options : [])
-    .map((s) => String(s).trim())
-    .filter(Boolean);
-
-  const optHtml = opts.map((op, i) => `
-    <label class="flex gap-2 p-2 border border-slate-800 rounded cursor-pointer">
-      <input type="radio" name="opt" value="${i}">
-      <span>${escapeHtml(op)}</span>
-    </label>
-  `).join("");
-
-  quiz.innerHTML = `
-    <div class="text-xl font-semibold mb-3">${escapeHtml(q.stem || "")}</div>
-    <div class="space-y-2">${optHtml || `<div class="text-slate-300">此題 options 欄位是空的</div>`}</div>
-
-    <div class="mt-3 flex gap-2">
-      <button id="submit" class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500">送出</button>
-      <button id="next" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">換一題</button>
     </div>
 
-    <div id="result" class="mt-3 text-sm"></div>
+    <div class="grid2">
+      <div class="card qCard" id="quizCard">
+        <div class="progressBox">
+          <span class="pill">總題數：<b id="totalCount">0</b></span>
+          <span class="pill">已完成：<b id="doneCount">0</b></span>
+          <span class="pill">正確：<b id="correctCount">0</b></span>
+          <span class="pill">正確率：<b id="accRate">0%</b></span>
+          <div class="bar" title="完成度"><i id="progBar"></i></div>
+        </div>
 
-    <details class="mt-3">
-      <summary class="cursor-pointer text-slate-300">解析</summary>
-      <div class="mt-2 text-slate-200">${escapeHtml(q.explanation || "")}</div>
-    </details>
-  `;
+        <div id="quizArea" style="margin-top:14px;">
+          <p class="meta">尚未開始。請先 Ping 或載入題目。</p>
+        </div>
 
-  $("next").onclick = () => {
-    if (!questions.length) return;
-    renderQuiz(pickNextQuestionPreferFresh());
-  };
+        <details id="debugBox">
+          <summary>Debug</summary>
+          <div class="explain mono" id="debugText" style="white-space:pre-wrap; overflow:auto; max-height:260px;"></div>
+        </details>
+      </div>
 
-  $("submit").onclick = async () => {
-    const picked = quiz.querySelector('input[name="opt"]:checked');
-    if (!picked) {
-      $("result").textContent = "請先選一個答案";
-      return;
-    }
+      <div class="card list" id="listCard">
+        <div class="itemTop">
+          <h2 style="margin:0;">題目清單</h2>
+          <div class="meta">目前載入：<span id="listCount">0</span> 題</div>
+        </div>
+        <div id="listArea" style="margin-top:12px;"></div>
+      </div>
+    </div>
 
-    const chosenIdx = Number(picked.value);
-    const localCorrect = chosenIdx === Number(q.answer_key);
-    const baseMessage = localCorrect ? "✅ 答對了！" : "❌ 答錯了！";
-    const resultEl = $("result");
-    resultEl.innerHTML = `<div class="font-semibold">${baseMessage}</div>`;
+  </div>
 
-    const detail = quiz.querySelector("details");
-    if (!localCorrect && detail) {
-      detail.open = true;
-    }
-
-    const submissionQuery = {
-      action: "submitAnswer",
-      user_id: getUserId(),
-      q_id: q.question_id,
-      chosen_answer: chosenIdx,
-    };
-    updateDebugDisplay({ sanitizedQuery: JSON.stringify(submissionQuery, null, 2), parsedCount: "（尚未解析）" });
-
-    const recordStatus = document.createElement("div");
-    recordStatus.className = "text-xs text-slate-300 mt-1";
-    recordStatus.textContent = "背景紀錄中…";
-    resultEl.appendChild(recordStatus);
-
-    try {
-      // 提交答案固定走 exec，避免 JSON POST 觸發 preflight
-      const submitResp = await callApiWithBase(API_EXEC_FALLBACK, {
-        method: "GET",
-        query: submissionQuery,
+  <script src="./apiClient.js"></script>
+  <script src="./quizUI.js"></script>
+  <script src="./memoryEngine.js"></script>
+  <script>
+    // ✅ 啟動
+    window.addEventListener('DOMContentLoaded', () => {
+      const app = new MemoryEngine({
+        api: new ApiClient({
+          // 你目前的 GAS WebApp（固定可用）
+          primaryBase: 'https://script.google.com/macros/s/AKfycbya27B-Xrr1nZzwT6c2eWNrPjMLbuc1nKF70ikVqGtaiZn7XQ5B37uhuyDZ6tWOk6Kh/exec',
+          // 若你有 googleusercontent 穩定入口，可讓「重新取得穩定入口」按鈕更新它
+          stableBase: '',
+          timeoutMs: 9000,
+          debug: true,
+        }),
+        ui: new QuizUI(),
+        storageKey: 'slg_v1',
       });
 
-      const parts = [];
-      if (submitResp.log_row) parts.push(`Logs 第 ${submitResp.log_row} 列`);
-      if (submitResp.logs_total) parts.push(`Logs 總筆數 ${submitResp.logs_total}`);
-      if (submitResp.log_timestamp) parts.push(`時間 ${submitResp.log_timestamp}`);
-      if (submitResp.written_to_spreadsheet_id) parts.push(`sheet ${submitResp.written_to_spreadsheet_id}`);
-
-      debugState.writtenSheetId = submitResp.written_to_spreadsheet_id || submitResp.spreadsheet_id || "（未回傳）";
-      updateDebugDisplay();
-
-      const serverExplanation = submitResp.explanation || q.explanation || "";
-      if (!localCorrect && serverExplanation) {
-        const explain = document.createElement("div");
-        explain.className = "mt-2 text-slate-200";
-        explain.innerHTML = `<div class="font-semibold text-amber-300">解析：</div>${escapeHtml(serverExplanation)}`;
-        resultEl.appendChild(explain);
-      }
-
-      let progressText = "";
-      try {
-        const progress = await callApi({
-          method: "GET",
-          query: { action: "getUserProgress", user_id: submissionQuery.user_id },
-          skipDebug: true,
-        });
-        lifetimeDone = Number(progress.logs_count || 0);
-        const checks = [];
-        if (progress.logs_count !== undefined) checks.push(`Logs ${progress.logs_count}`);
-        if (progress.mastery_count !== undefined) checks.push(`Mastery ${progress.mastery_count}`);
-        if (progress.mistakes_count !== undefined) checks.push(`Mistakes ${progress.mistakes_count}`);
-        if (progress.sheet_last_row) checks.push(`最後列 ${progress.sheet_last_row}`);
-        if (checks.length) progressText = `（${checks.join("，")}）`;
-      } catch (progressErr) {
-        progressText = `（progress 查詢失敗：${formatError(progressErr)}）`;
-      }
-
-      markQuestionDone(q.question_id);
-
-      const detailText = parts.length ? parts.join("，") : "已回傳寫入資訊";
-      recordStatus.textContent = `已記錄：${detailText} ${progressText}`;
-      recordStatus.className = "text-xs text-emerald-300 mt-1";
-
-      const delay = 600 + Math.floor(Math.random() * 300);
-      setTimeout(() => {
-        if (!questions.length) return;
-        const nextQ = pickNextQuestionPreferFresh();
-        if (nextQ) {
-          renderQuiz(nextQ);
-        } else {
-          setStatus("目前沒有題目可出，請重新載入或重新開始。", true);
-        }
-      }, delay);
-    } catch (e) {
-      const hint = formatError(e);
-      recordStatus.textContent = `未記錄（不影響測驗）。請重新整理或換網路再試。${hint ? " 詳細：" + hint : ""}`;
-      recordStatus.className = "text-xs text-amber-300 mt-1";
-    }
-  };
-}
-
-function noFiltersApplied(filters) {
-  return !filters.grade && !filters.unit && !filters.difficulty;
-}
-
-$("btnPing").onclick = async () => {
-  try {
-    setStatus("Ping 中…");
-    await ensureStableBase(); // 確保穩定入口存在
-    const r = await callApi({ method: "GET", query: { action: "ping", _: Date.now() } });
-    const msg = r.message || r.status || "pong";
-    const ts = r.ts ? `（${r.ts}）` : "";
-    setStatus(`API OK：${msg}${ts}`);
-  } catch (e) {
-    setStatus("Ping 失敗：" + formatError(e), true);
-  }
-};
-
-$("btnLoad").onclick = async () => {
-  try {
-    setStatus("載入中…");
-    await ensureStableBase();
-
-    const filters = {
-      grade: sanitizeFilterValue($("grade").value),
-      unit: sanitizeFilterValue($("unit").value),
-      difficulty: sanitizeDifficulty($("difficulty").value),
-    };
-
-    const query = {
-      action: "getQuestions",
-      limit: 100,
-      _: Date.now(),
-    };
-
-    if (filters.grade) query.grade = filters.grade;
-    if (filters.unit) query.unit = filters.unit;
-    if (filters.difficulty) query.difficulty = filters.difficulty;
-
-    updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
-
-    const { parsed, usedExec } = await fetchQuestionsWithFallback(query);
-    handleLoadedQuestions(parsed, { usedExec });
-  } catch (e) {
-    setStatus("載入失敗：" + formatError(e), true);
-    renderList([]);
-  }
-};
-
-$("btnLoadAll").onclick = async () => {
-  try {
-    setStatus("載入全部中…");
-    const query = { action: "getQuestions", limit: 100, _: Date.now() };
-    updateDebugDisplay({ sanitizedQuery: JSON.stringify(query, null, 2) });
-    const { parsed, usedExec } = await fetchQuestionsWithFallback(query);
-    handleLoadedQuestions(parsed, { usedExec });
-  } catch (e) {
-    setStatus("載入全部失敗：" + formatError(e), true);
-    renderList([]);
-  }
-};
-
-$("btnRefreshStable").onclick = async () => {
-  try {
-    await ensureStableBase({ force: true });
-    setStatus("✅ 已重新取得穩定入口（請再按一次載入題目）");
-  } catch (e) {
-    setStatus("重新取得失敗：" + formatError(e), true);
-  }
-};
-
-$("btnClearCache").onclick = () => {
-  localStorage.removeItem(LS_KEY);
-  API_BASE = API_GOOGLEUSERCONTENT_BASE || "";
-  setApiBaseText();
-  setStatus("已清除 API 快取（請按 Ping 或重新取得穩定入口）");
-};
-
-$("btnSaveProgress").onclick = () => {
-  saveProgress();
-  setStatus("✅ 已保存本次進度");
-};
-
-$("btnResetProgress").onclick = () => {
-  resetProgress();
-  setStatus("已清空進度，優先出未做過題目。");
-  if (questions.length) {
-    renderQuiz(pickNextQuestionPreferFresh());
-    renderList(questions);
-  }
-};
-
-$("user_id").addEventListener("change", () => {
-  ensureProgressLoaded();
-  refreshLifetimeProgress();
-  setStatus("已切換使用者，請重新載入題目以更新題庫。");
-});
-
-// 防 XSS：把題目文字安全輸出
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-// 初始：先嘗試載入快取的穩定入口
-(async function init() {
-  try {
-    await ensureStableBase();
-    ensureProgressLoaded();
-    refreshLifetimeProgress();
-  } catch (_) {
-    // 不擋 UI，使用者可手動 Ping
-  }
-})();
-</script>
+      app.init();
+      window.__APP__ = app; // 方便你在 console 直接調用 debug
+    });
+  </script>
 </body>
 </html>
