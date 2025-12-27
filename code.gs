@@ -46,31 +46,33 @@ function handleRequest_(e, method) {
     if (action === 'submitAnswer') {
       const user_id = String(params.user_id || 'u001').trim();
       const q_id = String(params.q_id || '').trim();
-      const chosen_answer = Number(params.chosen_answer);
+      const chosen_index = Number(params.chosen_index);
 
-      if (!q_id || Number.isNaN(chosen_answer)) {
-        return jsonError_('missing q_id or chosen_answer');
+      if (!q_id || Number.isNaN(chosen_index)) {
+        return jsonError_('missing q_id or chosen_index');
       }
+
+      const nowStr = nowTaipei_();
 
       // 找題目
       const q = getQuestionById_(q_id);
       if (!q) return jsonError_('question not found: ' + q_id);
 
       const answerKey = Number(q.answer_key);
-      const isCorrect = (chosen_answer === answerKey);
+      const isCorrect = (chosen_index === answerKey);
 
       // 更新 Mastery（計算下一次複習時間/等級）
-      const mastery = masteryUpdateAfterAnswer_(user_id, q, chosen_answer, isCorrect);
+      const mastery = masteryUpdateAfterAnswer_(user_id, q, chosen_index, isCorrect);
 
       // 寫入 Logs
       const logOk = appendLog_({
-        ts_taipei: nowTaipei_(),
+        ts_taipei: nowStr,
         user_id,
         q_id,
         grade: q.grade,
         unit: q.unit,
         difficulty: q.difficulty,
-        chosen_answer,
+        chosen_answer: chosen_index,
         answer_key: answerKey,
         is_correct: isCorrect,
         strength_before: mastery.strength_before,
@@ -79,6 +81,39 @@ function handleRequest_(e, method) {
         client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
         user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
       });
+
+      let ecsStatus = 'none';
+      let ecsStreak = undefined;
+      let ecsResp = null;
+
+      if (!isCorrect) {
+        const options = String(q.options || '').split(',').map(s => s.trim());
+        const chosenText = options[chosen_index] || '';
+        ecsResp = ecsUpsertOnWrong(
+          user_id,
+          q_id,
+          chosen_index,
+          chosenText,
+          q.explanation || '',
+          {
+            knowledge_tag: q.unit || '',
+            remedial_card_text: q.explanation || '',
+            remedial_asset_url: '',
+            importance_weight: 1,
+          },
+          nowStr
+        );
+        ecsStatus = 'active';
+      } else {
+        const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr);
+        ecsResp = ecsUpdate;
+        if (ecsUpdate && ecsUpdate.status) {
+          ecsStatus = ecsUpdate.status;
+        }
+        if (ecsUpdate && ecsUpdate.streak !== undefined) {
+          ecsStreak = ecsUpdate.streak;
+        }
+      }
 
       // need_remedial：Level>=4 答錯觸發（也可以改成任何錯都觸發）
       const needRemedial = (!isCorrect && mastery.strength_before >= 4);
@@ -92,7 +127,10 @@ function handleRequest_(e, method) {
         recorded: !!logOk,
         need_remedial: needRemedial,
         mastery,
-        ts_taipei: nowTaipei_(),
+        ts_taipei: nowStr,
+        ecs_status: ecsStatus,
+        ecs_streak: ecsStreak,
+        ecs: ecsResp,
       });
     }
 
@@ -100,6 +138,19 @@ function handleRequest_(e, method) {
       const user_id = String(params.user_id || 'u001').trim();
       const latest = getLatestLog_(user_id);
       return jsonOk_({ ok: true, latest, ts_taipei: nowTaipei_() });
+    }
+
+    if (action === 'getEcsQueue') {
+      const user_id = String(params.user_id || 'u001').trim();
+      const limit = Number(params.limit || 30);
+      const queue = ecsGetQueue(user_id, limit);
+      const qSet = new Set(queue.q_ids || []);
+      const questions = getQuestionsByIds_(qSet);
+      return jsonOk_({
+        ok: true,
+        data: questions,
+        meta: queue.meta || {},
+      });
     }
 
     return jsonError_('unknown action: ' + action);
