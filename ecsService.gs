@@ -19,6 +19,9 @@
 
 const ECS_SHEET_NAME = 'ECS';
 const ECS_EVENTS_SHEET_NAME = 'ECS_EVENTS';
+const ECS_RECENT_WINDOW_DAYS = 7;
+const ECS_EVENTS_SCAN_DAYS = 30;
+const ECS_EVENTS_SCAN_CAP = 5000;
 
 function getHeaderMap_(sheet) {
   const lastCol = sheet.getLastColumn();
@@ -116,22 +119,108 @@ function safeNumber_(v, fallback) {
  * 你目前先不用 importance_weight 也可以；但我保留作為微調入口。
  */
 function computePriorityScore_(wrongRecent7d, wrongTotal, importanceWeight) {
-  const r = safeNumber_(wrongRecent7d, 0);
-  const t = safeNumber_(wrongTotal, 0);
-  const w = safeNumber_(importanceWeight, 1);
-  // 基礎：recent_7d * 10 + total，再乘權重
-  return (r * 10 + t) * w;
+  return ecsComputePriorityScore_({
+    wrong_count_recent_7d: wrongRecent7d,
+    wrong_count_total: wrongTotal,
+    importance_weight: importanceWeight
+  });
+}
+
+function ecsComputePriorityScore_(rowOrObj) {
+  const r = safeNumber_(rowOrObj && rowOrObj.wrong_count_recent_7d, 0);
+  const t = safeNumber_(rowOrObj && rowOrObj.wrong_count_total, 0);
+  const w = safeNumber_(rowOrObj && rowOrObj.importance_weight, 1);
+  // recent 權重最高，再依總錯誤數微調
+  return (r * 1000 + t * 10) * w;
+}
+
+function ecsEnsureEcsSheet_() {
+  const requiredHeaders = [
+    'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
+    'last_wrong_choice','last_wrong_option_text','status',
+    'graduation_correct_days_streak','graduation_last_correct_date',
+    'variant_correct_count','updated_at','knowledge_tag','remedial_card_text',
+    'remedial_asset_url','importance_weight','priority_score'
+  ];
+  const sheet = getSheet_(ECS_SHEET_NAME, true);
+  const headerMap = ensureHeaders_(sheet, requiredHeaders);
+  return { sheet, headerMap };
+}
+
+function ecsEnsureEventsSheet_() {
+  const sheet = getSheet_(ECS_EVENTS_SHEET_NAME, true);
+  const headerMap = ensureHeaders_(sheet, ['user_id', 'q_id', 'event_type', 'payload_json', 'timestamp']);
+  return { sheet, headerMap };
+}
+
+function ecsAppendEvent_(eventObj) {
+  const { sheet, headerMap } = ecsEnsureEventsSheet_();
+  appendRowByHeaders_(sheet, headerMap, {
+    user_id: eventObj.user_id,
+    q_id: eventObj.q_id,
+    event_type: eventObj.event_type,
+    payload_json: JSON.stringify(eventObj.payload_json || {}),
+    timestamp: eventObj.timestamp || nowTaipeiStr_()
+  });
+}
+
+function ecsGetRecentEvents_(userId, daysLimit, maxRows) {
+  const { sheet } = ecsEnsureEventsSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const limitDays = safeNumber_(daysLimit, ECS_EVENTS_SCAN_DAYS);
+  const cap = safeNumber_(maxRows, ECS_EVENTS_SCAN_CAP);
+  const startRow = Math.max(2, lastRow - cap + 1);
+  const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - limitDays);
+
+  return values
+    .map(row => ({
+      user_id: String(row[0]),
+      q_id: String(row[1]),
+      event_type: String(row[2]),
+      payload_json: row[3],
+      timestamp: row[4]
+    }))
+    .filter(ev => String(ev.user_id) === String(userId))
+    .filter(ev => {
+      const ts = parseTaipeiTimestamp_(ev.timestamp) || new Date(ev.timestamp);
+      return ts && ts >= cutoff;
+    });
+}
+
+function ecsCalcRecent7dMap_(userId, nowDateObj) {
+  const now = nowDateObj || new Date();
+  const cutoff = new Date(now.getTime());
+  cutoff.setDate(cutoff.getDate() - ECS_RECENT_WINDOW_DAYS);
+
+  const events = ecsGetRecentEvents_(userId, ECS_EVENTS_SCAN_DAYS, ECS_EVENTS_SCAN_CAP);
+  const map = new Map();
+  events.forEach(ev => {
+    if (ev.event_type !== 'capture_wrong') return;
+    const ts = parseTaipeiTimestamp_(ev.timestamp) || new Date(ev.timestamp);
+    if (!ts || ts < cutoff) return;
+    const qid = String(ev.q_id);
+    const prev = map.get(qid) || 0;
+    map.set(qid, prev + 1);
+  });
+  return map;
+}
+
+function ecsCalcRecent7dCount_(userId, qId, nowDateObj) {
+  const map = ecsCalcRecent7dMap_(userId, nowDateObj);
+  return map.get(String(qId)) || 0;
 }
 
 function logEcsEvent_(userId, qId, eventType, payloadObj, timestampTaipei) {
-  const sh = getSheet_(ECS_EVENTS_SHEET_NAME, true);
-  const headerMap = ensureHeaders_(sh, ['user_id', 'q_id', 'event_type', 'payload_json', 'timestamp']);
-
-  appendRowByHeaders_(sh, headerMap, {
+  ecsAppendEvent_({
     user_id: userId,
     q_id: qId,
     event_type: eventType,
-    payload_json: JSON.stringify(payloadObj || {}),
+    payload_json: payloadObj || {},
     timestamp: timestampTaipei || nowTaipeiStr_()
   });
 }
@@ -147,18 +236,10 @@ function logEcsEvent_(userId, qId, eventType, payloadObj, timestampTaipei) {
  * @param {object} extra 可帶 knowledge_tag, remedial_asset_url, importance_weight
  */
 function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, nowTaipeiStr, extra) {
-  const sh = getSheet_(ECS_SHEET_NAME, true);
-
-  const requiredHeaders = [
-    'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
-    'last_wrong_choice','last_wrong_option_text','status',
-    'graduation_correct_days_streak','graduation_last_correct_date',
-    'variant_correct_count','updated_at','knowledge_tag','remedial_card_text',
-    'remedial_asset_url','importance_weight','priority_score'
-  ];
-  const headerMap = ensureHeaders_(sh, requiredHeaders);
+  const { sheet: sh, headerMap } = ecsEnsureEcsSheet_();
 
   const nowStr = nowTaipeiStr || nowTaipeiStr_();
+  const nowDate = parseTaipeiTimestamp_(nowStr) || new Date();
   const found = findEcsRow_(sh, headerMap, userId, qId);
 
   const payload = {
@@ -168,11 +249,18 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, now
     extra: extra || {}
   };
 
+  logEcsEvent_(userId, qId, 'capture_wrong', { ...payload, ecs_row: found.row }, nowStr);
+
+  const wrongRecent = ecsCalcRecent7dCount_(userId, qId, nowDate);
+
   if (found.row === -1) {
     const importanceWeight = (extra && extra.importance_weight != null) ? extra.importance_weight : 1;
     const wrongTotal = 1;
-    const wrongRecent = 1; // 先簡化：每次答錯就 +1
-    const priority = computePriorityScore_(wrongRecent, wrongTotal, importanceWeight);
+    const priority = ecsComputePriorityScore_({
+      wrong_count_recent_7d: wrongRecent,
+      wrong_count_total: wrongTotal,
+      importance_weight: importanceWeight
+    });
 
     const newRowObj = {
       user_id: userId,
@@ -195,8 +283,6 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, now
     };
 
     const newRow = appendRowByHeaders_(sh, headerMap, newRowObj);
-    logEcsEvent_(userId, qId, 'capture_wrong', { ...payload, ecs_row: newRow }, nowStr);
-
     return {
       ok: true,
       action: 'insert',
@@ -208,21 +294,23 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, now
   // update
   const rowVals = found.values;
   const wrongTotalOld = safeNumber_(getCell_(rowVals, headerMap, 'wrong_count_total'), 0);
-  const wrongRecentOld = safeNumber_(getCell_(rowVals, headerMap, 'wrong_count_recent_7d'), 0);
   const statusOld = String(getCell_(rowVals, headerMap, 'status') || '').trim() || 'active';
   const importanceOld = getCell_(rowVals, headerMap, 'importance_weight');
   const importanceWeight = (extra && extra.importance_weight != null) ? extra.importance_weight : safeNumber_(importanceOld, 1);
 
   const wrongTotalNew = wrongTotalOld + 1;
-  const wrongRecentNew = wrongRecentOld + 1; // 先簡化
-  const priority = computePriorityScore_(wrongRecentNew, wrongTotalNew, importanceWeight);
+  const priority = ecsComputePriorityScore_({
+    wrong_count_recent_7d: wrongRecent,
+    wrong_count_total: wrongTotalNew,
+    importance_weight: importanceWeight
+  });
 
   const remedialOld = String(getCell_(rowVals, headerMap, 'remedial_card_text') || '').trim();
   const remedialText = remedialOld ? remedialOld : (explanation || '');
 
   const updateObj = {
     wrong_count_total: wrongTotalNew,
-    wrong_count_recent_7d: wrongRecentNew,
+    wrong_count_recent_7d: wrongRecent,
     last_wrong_at: nowStr,
     last_wrong_choice: chosenIndex,
     last_wrong_option_text: chosenText,
@@ -236,7 +324,6 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, now
   };
 
   setRowByMap_(sh, found.row, headerMap, updateObj);
-  logEcsEvent_(userId, qId, 'capture_wrong', { ...payload, ecs_row: found.row, update: updateObj }, nowStr);
 
   return {
     ok: true,
@@ -332,20 +419,16 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
  * @returns {object} { ok, q_ids, meta }
  */
 function ecsGetQueue(userId, limit) {
-  const sh = getSheet_(ECS_SHEET_NAME, true);
-  const headerMap = ensureHeaders_(sh, [
-    'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
-    'last_wrong_choice','last_wrong_option_text','status',
-    'graduation_correct_days_streak','graduation_last_correct_date',
-    'variant_correct_count','updated_at','knowledge_tag','remedial_card_text',
-    'remedial_asset_url','importance_weight','priority_score'
-  ]);
+  const { sheet: sh, headerMap } = ecsEnsureEcsSheet_();
 
   const nowStr = nowTaipeiStr_();
+  const nowDate = parseTaipeiTimestamp_(nowStr) || new Date();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) {
     return { ok: true, q_ids: [], meta: { total_active: 0, now_taipei: nowStr } };
   }
+
+  const recentMap = ecsCalcRecent7dMap_(userId, nowDate);
 
   const values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
   const uCol = headerMap['user_id'];
@@ -353,6 +436,7 @@ function ecsGetQueue(userId, limit) {
   const stCol = headerMap['status'];
 
   const items = [];
+  const updates = [];
   for (let i = 0; i < values.length; i++) {
     const rowVals = values[i];
     if (String(rowVals[uCol - 1]) !== String(userId)) continue;
@@ -361,9 +445,22 @@ function ecsGetQueue(userId, limit) {
 
     const qId = String(rowVals[qCol - 1]);
     const wrongTotal = safeNumber_(getCell_(rowVals, headerMap, 'wrong_count_total'), 0);
+    const importanceWeight = safeNumber_(getCell_(rowVals, headerMap, 'importance_weight'), 1);
     const lastWrongAt = String(getCell_(rowVals, headerMap, 'last_wrong_at') || '');
-    const p = getCell_(rowVals, headerMap, 'priority_score');
-    const priority = safeNumber_(p, 0);
+    const recentCount = recentMap.get(qId) || 0;
+
+    const priority = ecsComputePriorityScore_({
+      wrong_count_recent_7d: recentCount,
+      wrong_count_total: wrongTotal,
+      importance_weight: importanceWeight,
+      last_wrong_at: lastWrongAt
+    });
+
+    const storedRecent = safeNumber_(getCell_(rowVals, headerMap, 'wrong_count_recent_7d'), 0);
+    const storedPriority = safeNumber_(getCell_(rowVals, headerMap, 'priority_score'), 0);
+    if (storedRecent !== recentCount || storedPriority !== priority) {
+      updates.push({ row: i + 2, wrong_count_recent_7d: recentCount, priority_score: priority });
+    }
 
     items.push({
       q_id: qId,
@@ -372,6 +469,13 @@ function ecsGetQueue(userId, limit) {
       last_wrong_at: lastWrongAt
     });
   }
+
+  updates.forEach(upd => {
+    setRowByMap_(sh, upd.row, headerMap, {
+      wrong_count_recent_7d: upd.wrong_count_recent_7d,
+      priority_score: upd.priority_score
+    });
+  });
 
   items.sort((a, b) => {
     if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;
@@ -388,7 +492,10 @@ function ecsGetQueue(userId, limit) {
     meta: {
       total_active: items.length,
       limit: lim,
-      now_taipei: nowStr
+      now_taipei: nowStr,
+      recent_window_days: ECS_RECENT_WINDOW_DAYS,
+      events_scan_days: ECS_EVENTS_SCAN_DAYS,
+      events_scan_cap: ECS_EVENTS_SCAN_CAP
     }
   };
 }
