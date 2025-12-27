@@ -17,6 +17,8 @@ class MemoryEngine {
       index: 0,
       done: 0,
       correct: 0,
+      mode: 'standard', // standard | ecs
+      ecsMeta: null,
       finished: false,
       lastSessionSummary: null,
       lastDebug: {},
@@ -35,6 +37,7 @@ class MemoryEngine {
 
     this.ui.on('onPing', () => this.ping());
     this.ui.on('onLoad', (ignoreFilter) => this.loadQuestions(ignoreFilter));
+    this.ui.on('onLoadEcsQueue', () => this.loadEcsQueue());
     this.ui.on('onGetStable', () => this.getStableEntry());
     this.ui.on('onClearCache', () => this.clearLocal());
     this.ui.on('onFinish', () => this.finishSession());
@@ -72,6 +75,10 @@ class MemoryEngine {
   _renderAll() {
     const total = this.state.questions.length;
     this.ui.setProgress({ total, done: this.state.done, correct: this.state.correct });
+    this.ui.setMode({
+      mode: this.state.mode,
+      ecsMeta: this.state.ecsMeta,
+    });
 
     const sess = this.state.finished
       ? `已完成（上次：${this.state.lastSessionSummary?.done || 0} 題）`
@@ -161,6 +168,8 @@ class MemoryEngine {
       this.state.index = 0;
       this.state.done = 0;
       this.state.correct = 0;
+      this.state.mode = 'standard';
+      this.state.ecsMeta = null;
       this.state.finished = false;
 
       this.ui.setApiLabel(this.api.getActiveBase());
@@ -174,6 +183,45 @@ class MemoryEngine {
       const msg = this._fmtError(e);
       this.ui.setApiStatus(`載入失敗（${msg}）`, 'bad');
       this._debug({ action: 'getQuestions', error: String(msg), params, detail: e });
+    }
+  }
+
+  async loadEcsQueue() {
+    const filters = this.ui.getFilters();
+    this.state.user_id = filters.user_id;
+    this.state.filters = filters;
+
+    const params = {
+      action: 'getEcsQueue',
+      user_id: filters.user_id,
+      limit: 30,
+    };
+
+    try {
+      this.ui.setApiStatus('載入錯題複習中...', 'warn');
+      const { json, url } = await this.api.get(params);
+
+      const list = Array.isArray(json.data) ? json.data : [];
+      this.state.questions = list;
+      this.state.index = 0;
+      this.state.done = 0;
+      this.state.correct = 0;
+      this.state.mode = 'ecs';
+      this.state.ecsMeta = json.meta || null;
+      this.state.finished = false;
+
+      const remain = json.meta && json.meta.total_active !== undefined ? json.meta.total_active : list.length;
+      this.ui.setApiLabel(this.api.getActiveBase());
+      this.ui.setApiStatus(`載入錯題成功：剩餘錯題 ${remain} 題，顯示 ${list.length} 題`, 'ok');
+      this._debug({ action: 'getEcsQueue', url, responseMeta: json.meta || null, parsedCount: list.length });
+
+      this._renderAll();
+      this._saveLocalSession();
+
+    } catch (e) {
+      const msg = this._fmtError(e);
+      this.ui.setApiStatus(`載入錯題失敗（${msg}）`, 'bad');
+      this._debug({ action: 'getEcsQueue', error: String(msg), params, detail: e });
     }
   }
 
@@ -221,10 +269,12 @@ class MemoryEngine {
         correct: this.state.correct
       });
 
-      // ✅ 作答後自動下一題（小延遲，讓使用者看見結果）
-      setTimeout(() => {
-        this.nextQuestion();
-      }, 350);
+      // ✅ 作答後自動下一題（僅答對時）；答錯需使用者自行點「換一題」
+      if (isCorrect) {
+        setTimeout(() => {
+          this.nextQuestion();
+        }, 350);
+      }
 
     } catch (e) {
       const msg = this._fmtError(e);
