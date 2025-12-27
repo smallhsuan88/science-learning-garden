@@ -102,6 +102,12 @@ function masteryPickQuestions_(userId, filters, limit) {
 }
 
 function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
+  const computed = masteryComputeUpdate_(userId, qObj, chosenAnswer, isCorrect);
+  masteryApplyUpdate_(computed.sheet, computed.rowValues, computed.rowIndex);
+  return computed.summary;
+}
+
+function masteryComputeUpdate_(userId, qObj, chosenAnswer, isCorrect) {
   const sh = ensureMasterySheet_();
   const { map, rowIndexByQid } = masteryLoadMap_(userId);
 
@@ -154,7 +160,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
   const nextDate = addDays_(new Date(), isCorrect ? days : Math.max(days, APP_CONFIG.WRONG_NEXT_DAYS_MIN));
   const nextReviewAt = formatTaipeiTs_(nextDate);
 
-  const row = [
+  const rowValues = [
     userId,
     qid,
     strengthAfter,
@@ -169,24 +175,31 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
   ];
 
   const existingRow = rowIndexByQid.get(qid);
-  if (existingRow) {
-    // 更新該列（從 A 開始）
-    sh.getRange(existingRow, 1, 1, row.length).setValues([row]);
-  } else {
-    sh.appendRow(row);
-  }
 
   return {
-    strength_before: strengthBefore,
-    strength_after: strengthAfter,
-    next_review_at: nextReviewAt,
-    mastered: mastered,
-    last_answered_at: nowTs,
-    last_correct_date: lastCorrectDate,
-    last_result: isCorrect ? 'correct' : 'wrong',
-    total_attempts: totalAttempts,
-    correct_streak: correctStreak,
+    sheet: sh,
+    rowValues,
+    rowIndex: existingRow,
+    summary: {
+      strength_before: strengthBefore,
+      strength_after: strengthAfter,
+      next_review_at: nextReviewAt,
+      mastered: mastered,
+      last_answered_at: nowTs,
+      last_correct_date: lastCorrectDate,
+      last_result: isCorrect ? 'correct' : 'wrong',
+      total_attempts: totalAttempts,
+      correct_streak: correctStreak,
+    }
   };
+}
+
+function masteryApplyUpdate_(sheet, rowValues, rowIndex) {
+  if (rowIndex) {
+    sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+  } else {
+    sheet.appendRow(rowValues);
+  }
 }
 
 function getUserMasteryMap(userId) {

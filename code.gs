@@ -47,16 +47,16 @@ function handleRequest_(e, method) {
       const user_id = String(params.user_id || 'u001').trim();
       const q_id = String(params.q_id || '').trim();
       const chosenRaw = params.chosen_index;
+      if (!q_id) {
+        return buildCorsResponse_({ ok: false, message: 'q_id required', error_code: 'BAD_PARAMS' }, 400);
+      }
       if (chosenRaw === undefined || chosenRaw === null || String(chosenRaw).trim() === '') {
-        return buildCorsResponse_({ ok: false, error: 'chosen_index required' });
+        return buildCorsResponse_({ ok: false, message: 'chosen_index required', error_code: 'BAD_PARAMS' }, 400);
       }
 
-      const chosen_index = Number(chosenRaw);
-      if (!Number.isInteger(chosen_index) || chosen_index < 0 || chosen_index > 3) {
-        return buildCorsResponse_({ ok: false, error: 'chosen_index required' });
-      }
-      if (!q_id) {
-        return buildCorsResponse_({ ok: false, error: 'q_id required' });
+      const chosen_index_norm = parseInt(String(chosenRaw).trim(), 10);
+      if (Number.isNaN(chosen_index_norm)) {
+        return buildCorsResponse_({ ok: false, message: 'invalid chosen_index', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
       }
 
       try {
@@ -64,15 +64,20 @@ function handleRequest_(e, method) {
 
         // 找題目
         const q = getQuestionById_(q_id);
-        if (!q) return buildCorsResponse_({ ok: false, error: 'question not found: ' + q_id });
+        if (!q) return buildCorsResponse_({ ok: false, message: 'question not found: ' + q_id, error_code: 'QUESTION_NOT_FOUND' }, 404);
 
-        const answerKey = Number(q.answer_key);
-        const isCorrect = (chosen_index === answerKey);
+        const answer_key_norm = parseInt(String(q.answer_key).trim(), 10);
+        if (Number.isNaN(answer_key_norm)) {
+          return buildCorsResponse_({ ok: false, message: 'bad answer_key', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
+        }
 
-        // 更新 Mastery（計算下一次複習時間/等級）
-        const mastery = masteryUpdateAfterAnswer_(user_id, q, chosen_index, isCorrect);
+        const isCorrect = (chosen_index_norm === answer_key_norm);
 
-        // 寫入 Logs
+        // 預先計算 Mastery（實際寫入放在 ECS 之後）
+        const masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
+        const mastery = masteryPlan.summary;
+
+        // 寫入 Logs（使用正規化後的 chosen_index）
         const logOk = appendLog_({
           ts_taipei: nowStr,
           user_id,
@@ -80,8 +85,8 @@ function handleRequest_(e, method) {
           grade: q.grade,
           unit: q.unit,
           difficulty: q.difficulty,
-          chosen_answer: chosen_index,
-          answer_key: answerKey,
+          chosen_answer: chosen_index_norm,
+          answer_key: answer_key_norm,
           is_correct: isCorrect,
           strength_before: mastery.strength_before,
           strength_after: mastery.strength_after,
@@ -94,12 +99,12 @@ function handleRequest_(e, method) {
         let ecsStreak = null;
 
         if (!isCorrect) {
-          const options = String(q.options || '').split(',').map(s => s.trim());
-          const chosenText = options[chosen_index] || '';
+          const options = normalizeOptionsList_(q.options);
+          const chosenText = options[chosen_index_norm] || '';
           ecsUpsertOnWrong(
             user_id,
             q_id,
-            chosen_index,
+            chosen_index_norm,
             chosenText,
             q.explanation || '',
             {
@@ -121,6 +126,9 @@ function handleRequest_(e, method) {
           }
         }
 
+        // 更新 Mastery（ECS 處理完成後才寫入）
+        masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.rowValues, masteryPlan.rowIndex);
+
         return buildCorsResponse_({
           ok: true,
           q_id,
@@ -130,10 +138,12 @@ function handleRequest_(e, method) {
           ecs_status: ecsStatus,
           ecs_streak: ecsStreak,
           need_remedial: !isCorrect && mastery.strength_before >= 4,
+          chosen_index_norm,
+          answer_key_norm,
         });
       } catch (err) {
         const msg = String(err && err.message ? err.message : err);
-        return buildCorsResponse_({ ok: false, error: msg });
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
       }
     }
 
@@ -148,11 +158,10 @@ function handleRequest_(e, method) {
       const limit = Number(params.limit || 30);
       const queue = ecsGetQueue(user_id, limit);
       const qIds = Array.isArray(queue.q_ids) ? queue.q_ids : [];
-      const allQuestions = getQuestionsAll_();
-      const mapById = new Map(allQuestions.map(q => [q.question_id, q]));
+      const questionsById = new Map(getQuestionsAll_().map(q => [q.question_id, q]));
       const questions = [];
       qIds.forEach(id => {
-        const q = mapById.get(id);
+        const q = questionsById.get(id);
         if (q) questions.push(q);
       });
       const meta = queue.meta || {};
@@ -166,10 +175,10 @@ function handleRequest_(e, method) {
       });
     }
 
-    return jsonError_('unknown action: ' + action);
+    return jsonError_('unknown action: ' + action, 'UNKNOWN_ACTION');
 
   } catch (err) {
-    return jsonError_(String(err && err.message ? err.message : err), 500);
+    return jsonError_(String(err && err.message ? err.message : err), 'SERVER_ERROR', 500);
   }
 }
 
@@ -179,9 +188,9 @@ function jsonOk_(obj) {
   return buildCorsResponse_(out);
 }
 
-function jsonError_(message, code) {
-  const out = { ok: false, message: String(message || 'error'), code: code || 400 };
-  return buildCorsResponse_(out, code || 400);
+function jsonError_(message, errorCode, httpCode) {
+  const out = { ok: false, message: String(message || 'error'), error_code: errorCode || 'SERVER_ERROR' };
+  return buildCorsResponse_(out, httpCode || 400);
 }
 
 function normalizeParams_(e, method) {
@@ -215,4 +224,9 @@ function buildCorsResponse_(payload, status) {
     output.setResponseCode(status);
   }
   return output;
+}
+
+function normalizeOptionsList_(optionsStr) {
+  const s = String(optionsStr || '').replace(/，/g, ',');
+  return s.split(',').map(x => x.trim()).filter(Boolean);
 }

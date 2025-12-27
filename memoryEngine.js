@@ -234,6 +234,8 @@ class MemoryEngine {
       this.ui.showResult({ ok:false, msg:'請先選擇一個答案' });
       return;
     }
+    const options = this._parseOptions(q.options);
+    const chosenText = options[chosen] || '';
 
     try {
       // 呼叫後端 submitAnswer
@@ -241,7 +243,8 @@ class MemoryEngine {
         action: 'submitAnswer',
         user_id: this.state.user_id,
         q_id: q.question_id,
-        chosen_index: chosen,
+        chosen_index: Number(chosen),
+        chosen_text: chosenText,
       };
 
       const { json, url } = await this.api.get(params);
@@ -368,10 +371,16 @@ class MemoryEngine {
   _fmtError(e) {
     if (!e || typeof e !== 'object') return String(e);
     const base = e.message || e.toString();
-    if (!e.type) return base;
-    if (e.type === 'network') return `network: ${base}`;
-    if (e.type === 'http') return `http ${e.status || ''}: ${base} ${e.body ? `body=${e.body}` : ''}`;
-    if (e.type === 'json') return `json parse: ${e.body || base}`;
-    return `${e.type}: ${base}`;
+    const code = e.error_code ? `[${e.error_code}] ` : '';
+    if (!e.type) return `${code}${base}`;
+    if (e.type === 'network') return `${code}network: ${base}`;
+    if (e.type === 'http') return `${code}http ${e.status || ''}: ${base} ${e.body ? `body=${e.body}` : ''}`;
+    if (e.type === 'json') return `${code}json parse: ${e.body || base}`;
+    return `${code}${e.type}: ${base}`;
+  }
+
+  _parseOptions(optionsStr) {
+    const s = String(optionsStr || '').replace(/，/g, ',');
+    return s.split(',').map(x => x.trim()).filter(Boolean);
   }
 }
