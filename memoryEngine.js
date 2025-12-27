@@ -27,6 +27,8 @@ class MemoryEngine {
 
   init() {
     this.ui.bindDom();
+    this.ui.setApiKey(this.api.getApiKey());
+    this.api.setApiKey(this.ui.getApiKey(), { persist: false });
 
     // init label
     this.ui.setApiLabel(this.api.getActiveBase());
@@ -42,6 +44,8 @@ class MemoryEngine {
     this.ui.on('onClearCache', () => this.clearLocal());
     this.ui.on('onFinish', () => this.finishSession());
     this.ui.on('onRestart', () => this.restartAll());
+    this.ui.on('onSaveKey', () => this.saveApiKey());
+    this.ui.on('onAuthTest', () => this.authTest());
 
     this.ui.on('onSubmit', () => this.submitCurrent());
     this.ui.on('onNext', () => this.nextQuestion());
@@ -117,7 +121,19 @@ class MemoryEngine {
     this.ui.renderDebug(this.state.lastDebug);
   }
 
+  _syncApiKey({ persist = true, showMissing = true } = {}) {
+    this.api.setApiKey(this.ui.getApiKey(), { persist });
+    const key = this.api.getApiKey();
+    if (!key) {
+      if (showMissing) this.ui.setApiStatus('缺少 API Key', 'bad');
+      return false;
+    }
+    return true;
+  }
+
   async ping() {
+    if (!this._syncApiKey()) return;
+
     try {
       this.ui.setApiStatus('連線中...', 'warn');
       const { json, url } = await this.api.ping();
@@ -141,6 +157,8 @@ class MemoryEngine {
   }
 
   async loadQuestions(ignoreFilter) {
+    if (!this._syncApiKey()) return;
+
     const filters = this.ui.getFilters();
     this.state.user_id = filters.user_id;
     this.state.filters = filters;
@@ -187,6 +205,8 @@ class MemoryEngine {
   }
 
   async loadEcsQueue() {
+    if (!this._syncApiKey()) return;
+
     const filters = this.ui.getFilters();
     this.state.user_id = filters.user_id;
     this.state.filters = filters;
@@ -226,6 +246,8 @@ class MemoryEngine {
   }
 
   async submitCurrent() {
+    if (!this._syncApiKey()) return;
+
     const q = this.state.questions[this.state.index];
     if (!q) return;
 
@@ -332,6 +354,8 @@ class MemoryEngine {
   }
 
   async restartAll() {
+    if (!this._syncApiKey()) return;
+
     // 你的需求是「重新開始：不以上次紀錄為主，直接重新作所有題庫」
     // ✅ 正確做法：後端需要提供 resetUser（清 Mastery / Logs 或至少清 Mastery）
     // 這裡先「嘗試」呼叫；若後端沒有做，就降級成清本機紀錄並提示
@@ -367,6 +391,27 @@ class MemoryEngine {
     localStorage.removeItem(this.storageKey);
     this.ui.setApiStatus('已清除本機快取', 'ok');
     this._debug({ action: 'clearLocal' });
+  }
+
+  saveApiKey() {
+    if (!this._syncApiKey()) return;
+    this.ui.setApiStatus('已儲存 API Key', 'ok');
+    this._debug({ action: 'saveApiKey', apiKeyLength: this.api.getApiKey().length });
+  }
+
+  async authTest() {
+    if (!this._syncApiKey()) return;
+
+    try {
+      this.ui.setApiStatus('測試授權中...', 'warn');
+      const { json, url } = await this.api.get({ action: 'authTest' });
+      this.ui.setApiStatus('授權 OK', 'ok');
+      this._debug({ action: 'authTest', url, response: json });
+    } catch (e) {
+      const msg = this._fmtError(e);
+      this.ui.setApiStatus(`授權失敗（${msg}）`, 'bad');
+      this._debug({ action: 'authTest', error: String(msg), detail: e });
+    }
   }
 
   _fmtError(e) {

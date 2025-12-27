@@ -20,6 +20,9 @@ class QuizUI {
     this.el.btnLoad = $('btnLoad');
     this.el.btnLoadAll = $('btnLoadAll');
     this.el.btnEcsQueue = $('btnEcsQueue');
+    this.el.apiKey = $('apiKey');
+    this.el.btnSaveKey = $('btnSaveKey');
+    this.el.btnAuthTest = $('btnAuthTest');
 
     this.el.btnStable = $('btnStable');
     this.el.btnClearCache = $('btnClearCache');
@@ -56,6 +59,8 @@ class QuizUI {
     this.el.btnClearCache.addEventListener('click', () => this.handlers.onClearCache?.());
     this.el.btnFinish.addEventListener('click', () => this.handlers.onFinish?.());
     this.el.btnRestart.addEventListener('click', () => this.handlers.onRestart?.());
+    this.el.btnSaveKey.addEventListener('click', () => this.handlers.onSaveKey?.());
+    this.el.btnAuthTest.addEventListener('click', () => this.handlers.onAuthTest?.());
 
     // hotkeys
     window.addEventListener('keydown', (ev) => {
@@ -79,6 +84,14 @@ class QuizUI {
   setApiStatus(text, kind = '') {
     this.el.apiStatus.textContent = text || '';
     this.el.apiStatus.className = kind ? kind : '';
+  }
+
+  setApiKey(key) {
+    if (this.el.apiKey) this.el.apiKey.value = key || '';
+  }
+
+  getApiKey() {
+    return (this.el.apiKey?.value || '').trim();
   }
 
   setSessionLabel(text) { this.el.sessionLabel.textContent = text || ''; }

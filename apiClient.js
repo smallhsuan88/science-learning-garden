@@ -3,7 +3,6 @@
  * - timeout、fallback、簡易 debug
  */
 
-const API_CLIENT_API_KEY = 'REPLACE_WITH_API_KEY';
 const API_KEY_STORAGE_KEY = 'slg_api_key';
 
 class ApiClient {
@@ -15,16 +14,35 @@ class ApiClient {
     this.apiKeyStorageKey = API_KEY_STORAGE_KEY;
 
     const storedApiKey = localStorage.getItem(this.apiKeyStorageKey);
-    const providedApiKey = opts.apiKey || API_CLIENT_API_KEY || '';
-    this.apiKey = (storedApiKey !== null ? storedApiKey : providedApiKey) || '';
-    if (storedApiKey === null) {
-      localStorage.setItem(this.apiKeyStorageKey, this.apiKey);
-    }
+    const providedApiKey = (opts.apiKey || '').trim();
+    this.apiKey = (storedApiKey ? storedApiKey.trim() : providedApiKey);
 
     // 用 localStorage 記住穩定入口（避免每次重貼）
     this.storageKey = 'slg_api_base_v1';
     this.activeBase = localStorage.getItem(this.storageKey) || this.stableBase || this.primaryBase;
     if (!this.activeBase) this.activeBase = this.primaryBase;
+
+    if (localStorage.getItem(this.apiKeyStorageKey) === 'REPLACE_WITH_API_KEY') {
+      localStorage.removeItem(this.apiKeyStorageKey);
+      this.apiKey = '';
+    }
+  }
+
+  setApiKey(key, { persist = true } = {}) {
+    const trimmed = String(key || '').trim();
+    this.apiKey = trimmed;
+    if (persist && trimmed) {
+      localStorage.setItem(this.apiKeyStorageKey, trimmed);
+    }
+  }
+
+  getApiKey() {
+    return this.apiKey || '';
+  }
+
+  clearApiKey() {
+    this.apiKey = '';
+    localStorage.removeItem(this.apiKeyStorageKey);
   }
 
   setActiveBase(url) {
@@ -152,13 +170,18 @@ class ApiClient {
   }
 
   async _requestWithFallback(method, params, bodyObj) {
+    if (!this.apiKey) {
+      throw this._makeErr('client', 'missing api_key', { error_code: 'MISSING_API_KEY' });
+    }
+
+    const authKey = this.apiKey;
     const paramsWithAuth = Object.assign({}, params || {});
-    paramsWithAuth.api_key = this.apiKey;
+    paramsWithAuth.api_key = authKey;
 
     let bodyWithAuth = bodyObj;
     if (method === 'POST') {
       bodyWithAuth = Object.assign({}, bodyObj || {});
-      bodyWithAuth.api_key = this.apiKey;
+      bodyWithAuth.api_key = authKey;
     }
 
     const bases = [];
@@ -194,6 +217,7 @@ class ApiClient {
     if (!err.error_code) {
       if (type === 'network') err.error_code = 'NETWORK_FAILED';
       else if (type === 'backend') err.error_code = 'BACKEND_OK_FALSE';
+      else if (type === 'client') err.error_code = 'CLIENT_ERROR';
     }
     return err;
   }
