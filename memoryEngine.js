@@ -67,7 +67,7 @@ class MemoryEngine {
     const payload = {
       finished: this.state.finished,
       lastSessionSummary: this.state.lastSessionSummary,
-      savedAt: new Date().toISOString(),
+      savedAt: this._nowTaipeiStr(),
     };
     localStorage.setItem(this.storageKey, JSON.stringify(payload));
   }
@@ -258,6 +258,7 @@ class MemoryEngine {
         is_correct: isCorrect,
         explanation: json.explanation || q.explanation || '',
         recorded: !!json.recorded,
+        recorded_message: json.recorded_message || json.message || '',
         need_remedial: !!json.need_remedial,
         ecs_status: json.ecs_status || 'none',
         ecs_streak: json.ecs_streak,
@@ -312,7 +313,7 @@ class MemoryEngine {
       done: this.state.done,
       correct: this.state.correct,
       acc: this.state.done ? Math.round((this.state.correct / Math.max(1, this.state.done)) * 100) : 0,
-      finishedAt: new Date().toISOString(),
+      finishedAt: this._nowTaipeiStr(),
       autoFinished: !!auto,
     };
 
@@ -382,5 +383,27 @@ class MemoryEngine {
   _parseOptions(optionsStr) {
     const s = String(optionsStr || '').replace(/，/g, ',');
     return s.split(',').map(x => x.trim()).filter(Boolean);
+  }
+
+  _nowTaipeiStr() {
+    try {
+      const fmt = new Intl.DateTimeFormat('zh-TW', {
+        timeZone: 'Asia/Taipei',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+      const parts = fmt.formatToParts(new Date()).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+      }, {});
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    } catch (_) {
+      return new Date().toString();
+    }
   }
 }

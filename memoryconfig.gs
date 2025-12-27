@@ -4,7 +4,7 @@
 const APP_CONFIG = {
   // ✅ 你的題庫 Spreadsheet ID（建議用同一個 spreadsheet 管理 Questions/Mastery/Logs）
   // 若 Questions 在另一份 Spreadsheet，也可以改成 QUESTION_SPREADSHEET_ID 與 LOG_SPREADSHEET_ID 分離
-  SPREADSHEET_ID: '',
+  SPREADSHEET_ID: '1vYlmGr_tSj3MKAbnRtnOSDgBv_j8cAbDkATtW4ammaM',
 
   SHEETS: {
     QUESTIONS: 'Questions',
@@ -47,8 +47,12 @@ const APP_CONFIG = {
   },
 };
 
-function nowTaipei_() {
+function nowTaipeiStr_() {
   return Utilities.formatDate(new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.TS_FORMAT);
+}
+
+function nowTaipei_() {
+  return nowTaipeiStr_();
 }
 
 function todayTaipei_() {
@@ -75,7 +79,16 @@ function addDays_(dateObj, days) {
 
 function getSpreadsheet_() {
   const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('SPREADSHEET_ID');
+  const id = props.getProperty('SPREADSHEET_ID') || APP_CONFIG.SPREADSHEET_ID;
   if (!id) throw new Error('Script Properties 缺少 SPREADSHEET_ID');
   return SpreadsheetApp.openById(id);
+}
+
+function getSheet_(name, createIfMissing) {
+  const ss = getSpreadsheet_();
+  let sh = ss.getSheetByName(name);
+  if (!sh && createIfMissing) {
+    sh = ss.insertSheet(name);
+  }
+  return sh;
 }

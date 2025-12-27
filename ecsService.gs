@@ -20,19 +20,6 @@
 const ECS_SHEET_NAME = 'ECS';
 const ECS_EVENTS_SHEET_NAME = 'ECS_EVENTS';
 
-function ecsGetSpreadsheet_() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('SPREADSHEET_ID');
-  if (!id) throw new Error('Script Properties 缺少 SPREADSHEET_ID');
-  return SpreadsheetApp.openById(id);
-}
-
-function getOrCreateSheet_(ss, name) {
-  let sh = ss.getSheetByName(name);
-  if (!sh) sh = ss.insertSheet(name);
-  return sh;
-}
-
 function getHeaderMap_(sheet) {
   const lastCol = sheet.getLastColumn();
   if (lastCol === 0) return {};
@@ -136,8 +123,8 @@ function computePriorityScore_(wrongRecent7d, wrongTotal, importanceWeight) {
   return (r * 10 + t) * w;
 }
 
-function logEcsEvent_(ss, userId, qId, eventType, payloadObj, timestampTaipei) {
-  const sh = getOrCreateSheet_(ss, ECS_EVENTS_SHEET_NAME);
+function logEcsEvent_(userId, qId, eventType, payloadObj, timestampTaipei) {
+  const sh = getSheet_(ECS_EVENTS_SHEET_NAME, true);
   const headerMap = ensureHeaders_(sh, ['user_id', 'q_id', 'event_type', 'payload_json', 'timestamp']);
 
   appendRowByHeaders_(sh, headerMap, {
@@ -145,7 +132,7 @@ function logEcsEvent_(ss, userId, qId, eventType, payloadObj, timestampTaipei) {
     q_id: qId,
     event_type: eventType,
     payload_json: JSON.stringify(payloadObj || {}),
-    timestamp: timestampTaipei || nowTaipei_()
+    timestamp: timestampTaipei || nowTaipeiStr_()
   });
 }
 
@@ -156,12 +143,11 @@ function logEcsEvent_(ss, userId, qId, eventType, payloadObj, timestampTaipei) {
  * @param {number} chosenIndex
  * @param {string} chosenText
  * @param {string} explanation (可用於 remedial_card_text)
- * @param {object} extra 可帶 knowledge_tag, remedial_asset_url, importance_weight
  * @param {string} nowTaipeiStr
+ * @param {object} extra 可帶 knowledge_tag, remedial_asset_url, importance_weight
  */
-function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, extra, nowTaipeiStr) {
-  const ss = ecsGetSpreadsheet_();
-  const sh = getOrCreateSheet_(ss, ECS_SHEET_NAME);
+function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, nowTaipeiStr, extra) {
+  const sh = getSheet_(ECS_SHEET_NAME, true);
 
   const requiredHeaders = [
     'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
@@ -172,7 +158,7 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, ext
   ];
   const headerMap = ensureHeaders_(sh, requiredHeaders);
 
-  const nowStr = nowTaipeiStr || nowTaipei_();
+  const nowStr = nowTaipeiStr || nowTaipeiStr_();
   const found = findEcsRow_(sh, headerMap, userId, qId);
 
   const payload = {
@@ -209,7 +195,7 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, ext
     };
 
     const newRow = appendRowByHeaders_(sh, headerMap, newRowObj);
-    logEcsEvent_(ss, userId, qId, 'capture_wrong', { ...payload, ecs_row: newRow }, nowStr);
+    logEcsEvent_(userId, qId, 'capture_wrong', { ...payload, ecs_row: newRow }, nowStr);
 
     return {
       ok: true,
@@ -250,7 +236,7 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, ext
   };
 
   setRowByMap_(sh, found.row, headerMap, updateObj);
-  logEcsEvent_(ss, userId, qId, 'capture_wrong', { ...payload, ecs_row: found.row, update: updateObj }, nowStr);
+  logEcsEvent_(userId, qId, 'capture_wrong', { ...payload, ecs_row: found.row, update: updateObj }, nowStr);
 
   return {
     ok: true,
@@ -266,9 +252,8 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, ext
  * @param {string} qId
  * @param {string} nowTaipeiStr
  */
-function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr) {
-  const ss = ecsGetSpreadsheet_();
-  const sh = getOrCreateSheet_(ss, ECS_SHEET_NAME);
+function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
+  const sh = getSheet_(ECS_SHEET_NAME, true);
 
   const requiredHeaders = [
     'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
@@ -279,20 +264,20 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr) {
   ];
   const headerMap = ensureHeaders_(sh, requiredHeaders);
 
-  const nowStr = nowTaipeiStr || nowTaipei_();
-  const today = todayTaipei_();
+  const nowStr = nowTaipeiStr || nowTaipeiStr_();
+  const today = todayStr || todayTaipei_();
 
   const found = findEcsRow_(sh, headerMap, userId, qId);
   if (found.row === -1) {
     // 不在錯題本，不做事，但仍可留事件
-    logEcsEvent_(ss, userId, qId, 'ecs_correct_non_ecs', { note: 'not_in_ecs' }, nowStr);
+    logEcsEvent_(userId, qId, 'ecs_correct_non_ecs', { note: 'not_in_ecs' }, nowStr);
     return { ok: true, action: 'noop', reason: 'not_in_ecs' };
   }
 
   const rowVals = found.values;
   const status = String(getCell_(rowVals, headerMap, 'status') || '').trim() || 'active';
   if (status !== 'active') {
-    logEcsEvent_(ss, userId, qId, 'ecs_correct_ignored', { status }, nowStr);
+    logEcsEvent_(userId, qId, 'ecs_correct_ignored', { status }, nowStr);
     return { ok: true, action: 'noop', reason: 'not_active', status };
   }
 
@@ -325,7 +310,7 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr) {
   };
 
   setRowByMap_(sh, found.row, headerMap, updateObj);
-  logEcsEvent_(ss, userId, qId, eventType, { streak, today, row: found.row }, nowStr);
+  logEcsEvent_(userId, qId, eventType, { streak, today, row: found.row }, nowStr);
 
   return {
     ok: true,
@@ -344,8 +329,7 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr) {
  * @returns {object} { ok, q_ids, meta }
  */
 function ecsGetQueue(userId, limit) {
-  const ss = ecsGetSpreadsheet_();
-  const sh = getOrCreateSheet_(ss, ECS_SHEET_NAME);
+  const sh = getSheet_(ECS_SHEET_NAME, true);
   const headerMap = ensureHeaders_(sh, [
     'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
     'last_wrong_choice','last_wrong_option_text','status',
@@ -354,7 +338,7 @@ function ecsGetQueue(userId, limit) {
     'remedial_asset_url','importance_weight','priority_score'
   ]);
 
-  const nowStr = nowTaipei_();
+  const nowStr = nowTaipeiStr_();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) {
     return { ok: true, q_ids: [], meta: { total_active: 0, now_taipei: nowStr } };
@@ -410,8 +394,7 @@ function ecsGetQueue(userId, limit) {
  * （可選）提供給後端 debug 用：查單題 ECS 狀態
  */
 function ecsGetOne(userId, qId) {
-  const ss = ecsGetSpreadsheet_();
-  const sh = getOrCreateSheet_(ss, ECS_SHEET_NAME);
+  const sh = getSheet_(ECS_SHEET_NAME, true);
   const headerMap = ensureHeaders_(sh, [
     'user_id','q_id','wrong_count_total','wrong_count_recent_7d','last_wrong_at',
     'last_wrong_choice','last_wrong_option_text','status',
