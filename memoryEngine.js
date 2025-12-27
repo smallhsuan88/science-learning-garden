@@ -277,7 +277,7 @@ class MemoryEngine {
       if (isCorrect) {
         setTimeout(() => {
           this.nextQuestion();
-        }, 350);
+        }, 1000);
       }
 
     } catch (e) {

@@ -207,6 +207,13 @@ function handleRequest_(e, method) {
       }
     }
 
+    if (action === 'validateQuestions') {
+      const limit = Number(params.limit || 200);
+      const refresh = params.refresh;
+      const result = validateQuestions_(limit, refresh);
+      return jsonOk_(result);
+    }
+
     return jsonError_('unknown action: ' + action, 'UNKNOWN_ACTION');
 
   } catch (err) {

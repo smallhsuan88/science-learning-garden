@@ -49,12 +49,11 @@ function getQuestionsAll_() {
 
       const rawAnswer = String(getByHeader(r, 'answer_key') ?? '').trim();
       const answerNumber = rawAnswer === '' ? NaN : Number(rawAnswer);
-      if (!Number.isFinite(answerNumber)) {
-        throw new Error(`題目 ${qid} 的 answer_key 無法解析：${rawAnswer}`);
-      }
+      if (!Number.isFinite(answerNumber)) return null;
 
       const optionsRaw = String(getByHeader(r, 'options') ?? '').trim();
       const normalizedOptions = normalizeOptionsString_(optionsRaw);
+      if (!normalizedOptions) return null;
 
       return {
         question_id: qid,
