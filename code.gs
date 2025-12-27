@@ -236,6 +236,20 @@ function handleRequest_(e, method) {
       return jsonOk_(result);
     }
 
+    if (action === 'refreshQuestionsCache') {
+      try {
+        const cacheVer = bumpQuestionsCacheVersion_();
+        return jsonOk_({
+          ok: true,
+          cache_ver: cacheVer,
+          ts_taipei: nowTaipeiStr_(),
+        });
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
+      }
+    }
+
     return jsonError_('unknown action: ' + action, 'UNKNOWN_ACTION');
 
   } catch (err) {

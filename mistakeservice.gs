@@ -12,6 +12,30 @@ function ensureMistakesSheet_() {
   return { sheet: sh, headerMap };
 }
 
+function mistakesLoadMap_(userId) {
+  const { sheet, headerMap } = ensureMistakesSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return new Map();
+
+  const getVal = (row, key) => {
+    const col = headerMap[key];
+    if (!col) return '';
+    return row[col - 1];
+  };
+
+  const map = new Map();
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    if (String(getVal(row, 'user_id') || '').trim() !== userId) continue;
+    const qid = String(getVal(row, 'q_id') || '').trim();
+    if (!qid) continue;
+    const strike = safeNumber_(getVal(row, 'strike'), 0);
+    map.set(qid, strike);
+  }
+
+  return map;
+}
+
 function mistakesUpsertOnWrong(userId, qId, todayStr) {
   const { sheet, headerMap } = ensureMistakesSheet_();
   const found = findEcsRow_(sheet, headerMap, userId, qId);
