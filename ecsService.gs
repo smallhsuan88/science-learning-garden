@@ -20,24 +20,11 @@
 const ECS_SHEET_NAME = 'ECS';
 const ECS_EVENTS_SHEET_NAME = 'ECS_EVENTS';
 
-// 建議：把 Spreadsheet ID 放到 Script Properties（SPREADSHEET_ID）
-// 若沒設定，則會用 Active Spreadsheet（同一份專案綁定的試算表）
-// 你也可以在此直接填死，但不建議。
-// const SPREADSHEET_ID = '1vYlmGr_tSj3MKAbnRtnOSDgBv_j8cAbDkATtW4ammaM';
-
 function ecsGetSpreadsheet_() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('SPREADSHEET_ID');
-  if (id) return SpreadsheetApp.openById(id);
-  return SpreadsheetApp.getActiveSpreadsheet();
-}
-
-function nowTaipei_() {
-  return Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm:ss');
-}
-
-function todayTaipei_() {
-  return Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
+  if (!id) throw new Error('Script Properties 缺少 SPREADSHEET_ID');
+  return SpreadsheetApp.openById(id);
 }
 
 function getOrCreateSheet_(ss, name) {
@@ -189,8 +176,8 @@ function ecsUpsertOnWrong(userId, qId, chosenIndex, chosenText, explanation, ext
   const found = findEcsRow_(sh, headerMap, userId, qId);
 
   const payload = {
-    chosen_index: chosenIndex,
-    chosen_text: chosenText,
+    chosenIndex: chosenIndex,
+    chosenText: chosenText,
     explanation: explanation || '',
     extra: extra || {}
   };

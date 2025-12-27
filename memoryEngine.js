@@ -193,7 +193,7 @@ class MemoryEngine {
         action: 'submitAnswer',
         user_id: this.state.user_id,
         q_id: q.question_id,
-        chosen_answer: chosen,
+        chosen_index: chosen,
       };
 
       const { json, url } = await this.api.get(params);
@@ -208,6 +208,8 @@ class MemoryEngine {
         explanation: json.explanation || q.explanation || '',
         recorded: !!json.recorded,
         need_remedial: !!json.need_remedial,
+        ecs_status: json.ecs_status || 'none',
+        ecs_streak: json.ecs_streak,
       });
 
       this._debug({ action: 'submitAnswer', url, request: params, response: json });

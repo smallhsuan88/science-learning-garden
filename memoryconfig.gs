@@ -74,11 +74,8 @@ function addDays_(dateObj, days) {
 }
 
 function getSpreadsheet_() {
-  const id = APP_CONFIG.SPREADSHEET_ID;
-  if (!id) {
-    // ✅ 若未填 SPREADSHEET_ID，就使用「當前專案綁定的 Spreadsheet」（若你是 Container-bound 才有效）
-    // 若不是 container-bound，請務必填 SPREADSHEET_ID
-    return SpreadsheetApp.getActiveSpreadsheet();
-  }
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('SPREADSHEET_ID');
+  if (!id) throw new Error('Script Properties 缺少 SPREADSHEET_ID');
   return SpreadsheetApp.openById(id);
 }
