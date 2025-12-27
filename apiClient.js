@@ -38,7 +38,7 @@ class ApiClient {
     const ms = this.timeoutMs;
     let timer;
     const t = new Promise((_, rej) => {
-      timer = setTimeout(() => rej(new Error('timeout')), ms);
+      timer = setTimeout(() => rej(this._makeErr('network', 'timeout', { error_code: 'NETWORK_TIMEOUT' })), ms);
     });
     return Promise.race([promise, t]).finally(() => clearTimeout(timer));
   }
@@ -96,7 +96,10 @@ class ApiClient {
     try {
       res = await this._withTimeout(fetch(url, init));
     } catch (e) {
-      throw this._makeErr('network', `Network error / fetch failed: ${e.message || e}`, { url });
+      if (e && e.error_code === 'NETWORK_TIMEOUT') {
+        throw e;
+      }
+      throw this._makeErr('network', `Network error / fetch failed: ${e.message || e}`, { url, error_code: 'NETWORK_FAILED' });
     }
 
     let text = '';
@@ -112,6 +115,7 @@ class ApiClient {
         statusText: res.statusText,
         body: text.slice(0, 200),
         url,
+        error_code: 'NETWORK_FAILED',
       });
     }
 
@@ -119,12 +123,17 @@ class ApiClient {
     try {
       json = JSON.parse(text);
     } catch (e) {
-      throw this._makeErr('json', 'JSON parse error', { url, body: text.slice(0, 200) });
+      throw this._makeErr('json', 'JSON parse error', { url, body: text.slice(0, 200), error_code: 'BACKEND_OK_FALSE' });
     }
 
     if (!json || json.ok === false) {
       const msg = json && (json.message || json.error) ? (json.message || json.error) : 'api error';
-      throw this._makeErr('api', msg, { url, body: text.slice(0, 200) });
+      throw this._makeErr('backend', msg, {
+        url,
+        body: text.slice(0, 200),
+        backend: json,
+        error_code: (json && json.error_code) ? json.error_code : 'BACKEND_OK_FALSE'
+      });
     }
 
     return { json, url, raw: text };
@@ -153,13 +162,18 @@ class ApiClient {
         this._log('fallback failed base=', b, 'err=', String(e.message || e));
       }
     }
-    throw lastErr || new Error('Failed to fetch');
+    if (lastErr) throw lastErr;
+    throw this._makeErr('network', 'no base available', { error_code: 'NETWORK_FAILED' });
   }
 
   _makeErr(type, message, extra = {}) {
     const err = new Error(message);
     err.type = type;
     Object.assign(err, extra);
+    if (!err.error_code) {
+      if (type === 'network') err.error_code = 'NETWORK_FAILED';
+      else if (type === 'backend') err.error_code = 'BACKEND_OK_FALSE';
+    }
     return err;
   }
 }

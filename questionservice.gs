@@ -38,17 +38,31 @@ function getQuestionsAll_() {
 
   const rows = values.slice(1);
   const list = rows
-    .map(r => ({
-      question_id: String(r[i_qid] ?? '').trim(),
-      grade: r[i_grade] ?? '',
-      unit: String(r[i_unit] ?? '').trim(),
-      stem: String(r[i_stem] ?? '').trim(),
-      options: String(r[i_options] ?? '').trim(), // 前端會 split
-      answer_key: (r[i_answer] === '' || r[i_answer] === null || r[i_answer] === undefined) ? '' : Number(r[i_answer]),
-      explanation: String(r[i_exp] ?? '').trim(),
-      difficulty: String(r[i_diff] ?? '').trim(),
-    }))
-    .filter(q => q.question_id);
+    .map(r => {
+      const qid = String(r[i_qid] ?? '').trim();
+      if (!qid) return null;
+
+      const rawAnswer = String(r[i_answer] ?? '').trim();
+      const answer = rawAnswer === '' ? NaN : parseInt(rawAnswer, 10);
+      if (Number.isNaN(answer)) {
+        throw new Error(`題目 ${qid} 的 answer_key 無法解析：${rawAnswer}`);
+      }
+
+      const optionsRaw = String(r[i_options] ?? '').trim();
+      const normalizedOptions = normalizeOptionsString_(optionsRaw);
+
+      return {
+        question_id: qid,
+        grade: r[i_grade] ?? '',
+        unit: String(r[i_unit] ?? '').trim(),
+        stem: String(r[i_stem] ?? '').trim(),
+        options: normalizedOptions,
+        answer_key: answer,
+        explanation: String(r[i_exp] ?? '').trim(),
+        difficulty: String(r[i_diff] ?? '').trim(),
+      };
+    })
+    .filter(q => q && q.question_id);
 
   cache.put(key, JSON.stringify(list), 60); // 60 秒快取（可調）
   return list;
@@ -100,4 +114,14 @@ function pickRandom_(arr, n) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a.slice(0, n);
+}
+
+function normalizeOptionsString_(optionsStr) {
+  // 將全形逗號轉半形、移除多餘空白，確保 chosenText 位置一致
+  const cleaned = String(optionsStr || '').replace(/，/g, ',');
+  return cleaned
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .join(',');
 }

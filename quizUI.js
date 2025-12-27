@@ -120,7 +120,7 @@ class QuizUI {
       return;
     }
 
-    const options = String(q.options || '').split(',').map(s => s.trim()).filter(Boolean);
+    const options = this._parseOptions(q.options);
     const qid = q.question_id;
 
     const html = `
@@ -235,6 +235,11 @@ class QuizUI {
   readChosenAnswer() {
     if (!this.el._readChosen) return null;
     return this.el._readChosen();
+  }
+
+  _parseOptions(optionsStr) {
+    const s = String(optionsStr || '').replace(/，/g, ',');
+    return s.split(',').map(x => x.trim()).filter(Boolean);
   }
 }
 
