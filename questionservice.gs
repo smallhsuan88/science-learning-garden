@@ -3,62 +3,69 @@
  */
 
 function ensureQuestionsSheet_() {
-  const sh = getSheet_(APP_CONFIG.SHEETS.QUESTIONS, false);
+  const sh = getSheet_(APP_CONFIG.SHEETS.QUESTIONS, true);
   if (!sh) throw new Error(`找不到題庫工作表：${APP_CONFIG.SHEETS.QUESTIONS}`);
-  return sh;
+  const headers = [
+    'question_id',
+    'grade',
+    'unit',
+    'stem',
+    'options',
+    'answer_key',
+    'explanation',
+    'difficulty',
+  ];
+  const headerMap = ensureHeaders_(sh, headers);
+  if (sh.getFrozenRows() < 1) {
+    sh.setFrozenRows(1);
+  }
+  return { sheet: sh, headerMap };
 }
 
 function getQuestionsAll_() {
   // ✅ 使用 Cache 避免每次都全表讀取（可選）
   const cache = CacheService.getScriptCache();
-  const key = 'questions_all_v1';
+  const key = 'questions_all_v2';
   const cached = cache.get(key);
   if (cached) {
     try { return JSON.parse(cached); } catch (e) {}
   }
 
-  const sh = ensureQuestionsSheet_();
+  const { sheet: sh, headerMap } = ensureQuestionsSheet_();
   const values = sh.getDataRange().getValues();
   if (values.length < 2) return [];
 
-  const headers = values[0].map(h => String(h || '').trim());
-  const idx = (name) => headers.indexOf(name);
-
-  const i_qid = idx('question_id');
-  const i_grade = idx('grade');
-  const i_unit = idx('unit');
-  const i_stem = idx('stem');
-  const i_options = idx('options');
-  const i_answer = idx('answer_key');
-  const i_exp = idx('explanation');
-  const i_diff = idx('difficulty');
-
-  if (i_qid < 0) throw new Error('題庫缺少 question_id 欄位');
+  const getByHeader = (row, key) => {
+    const col = headerMap[key];
+    if (!col) return '';
+    return row[col - 1];
+  };
 
   const rows = values.slice(1);
   const list = rows
     .map(r => {
-      const qid = String(r[i_qid] ?? '').trim();
+      const qid = String(getByHeader(r, 'question_id') ?? '').trim();
       if (!qid) return null;
 
-      const rawAnswer = String(r[i_answer] ?? '').trim();
-      const answer = rawAnswer === '' ? NaN : parseInt(rawAnswer, 10);
-      if (Number.isNaN(answer)) {
+      const rawAnswer = String(getByHeader(r, 'answer_key') ?? '').trim();
+      const answerNumber = rawAnswer === '' ? NaN : Number(rawAnswer);
+      if (!Number.isFinite(answerNumber)) {
         throw new Error(`題目 ${qid} 的 answer_key 無法解析：${rawAnswer}`);
       }
 
-      const optionsRaw = String(r[i_options] ?? '').trim();
+      const optionsRaw = String(getByHeader(r, 'options') ?? '').trim();
       const normalizedOptions = normalizeOptionsString_(optionsRaw);
 
       return {
         question_id: qid,
-        grade: r[i_grade] ?? '',
-        unit: String(r[i_unit] ?? '').trim(),
-        stem: String(r[i_stem] ?? '').trim(),
+        grade: getByHeader(r, 'grade') ?? '',
+        unit: String(getByHeader(r, 'unit') ?? '').trim(),
+        stem: String(getByHeader(r, 'stem') ?? '').trim(),
         options: normalizedOptions,
-        answer_key: answer,
-        explanation: String(r[i_exp] ?? '').trim(),
-        difficulty: String(r[i_diff] ?? '').trim(),
+        answer_key: rawAnswer,
+        answer_key_number: answerNumber,
+        explanation: String(getByHeader(r, 'explanation') ?? '').trim(),
+        difficulty: String(getByHeader(r, 'difficulty') ?? '').trim(),
       };
     })
     .filter(q => q && q.question_id);

@@ -52,23 +52,24 @@ function handleRequest_(e, method) {
         return buildCorsResponse_({ ok: false, message: 'q_id required', error_code: 'BAD_PARAMS' }, 400);
       }
       if (chosenRaw === undefined || chosenRaw === null || String(chosenRaw).trim() === '') {
-        return buildCorsResponse_({ ok: false, message: 'chosen_index required', error_code: 'BAD_PARAMS' }, 400);
+        return buildCorsResponse_({ ok: false, message: 'missing chosen_index', error_code: 'BAD_PARAMS' }, 400);
       }
 
-      const chosen_index_norm = parseInt(String(chosenRaw).trim(), 10);
-      if (Number.isNaN(chosen_index_norm)) {
+      const chosen_index_norm = Number(chosenRaw);
+      if (!Number.isFinite(chosen_index_norm)) {
         return buildCorsResponse_({ ok: false, message: 'invalid chosen_index', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
       }
 
       try {
         const nowStr = nowTaipeiStr_();
-        const todayStr = todayTaipei_();
+        const todayStr = todayTaipeiStr_();
 
         // 找題目
         const q = getQuestionById_(q_id);
         if (!q) return buildCorsResponse_({ ok: false, message: 'question not found: ' + q_id, error_code: 'QUESTION_NOT_FOUND' }, 404);
 
-        const answer_key_norm = Number(String(q.answer_key).trim());
+        const ansRaw = q.answer_key;
+        const answer_key_norm = Number(String(ansRaw).trim());
         if (!Number.isFinite(answer_key_norm)) {
           return buildCorsResponse_({ ok: false, message: 'bad answer_key', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
         }
@@ -104,8 +105,11 @@ function handleRequest_(e, method) {
         let ecsStreak = null;
 
         if (!isCorrect) {
+          mistakesUpsertOnWrong(user_id, q_id, todayStr);
           const options = normalizeOptionsList_(q.options);
-          const chosenText = options[chosen_index_norm] || '';
+          const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
+            ? String(params.chosen_text)
+            : (options[ci] || '');
           ecsUpsertOnWrong(
             user_id,
             q_id,
@@ -132,7 +136,7 @@ function handleRequest_(e, method) {
         }
 
         // 更新 Mastery（ECS 處理完成後才寫入）
-        masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.rowValues, masteryPlan.rowIndex);
+        masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
 
         return buildCorsResponse_({
           ok: true,
@@ -147,6 +151,13 @@ function handleRequest_(e, method) {
           need_remedial: !isCorrect && mastery.strength_before >= 4,
           chosen_index_norm,
           answer_key_norm,
+          debug: {
+            chosen: ci,
+            ans: ak,
+            chosen_raw: chosenRaw,
+            ans_raw: ansRaw,
+            q_id,
+          },
         });
       } catch (err) {
         const msg = String(err && err.message ? err.message : err);
@@ -157,7 +168,7 @@ function handleRequest_(e, method) {
     if (action === 'getLatestLog') {
       const user_id = String(params.user_id || 'u001').trim();
       const latest = getLatestLog_(user_id);
-      return jsonOk_({ ok: true, latest, ts_taipei: nowTaipei_() });
+      return jsonOk_({ ok: true, latest, ts_taipei: nowTaipeiStr_() });
     }
 
     if (action === 'getEcsQueue') {
@@ -173,13 +184,27 @@ function handleRequest_(e, method) {
       });
       const meta = queue.meta || {};
       if (meta.total_active === undefined) meta.total_active = questions.length;
-      if (!meta.now_taipei) meta.now_taipei = nowTaipei_();
+      if (!meta.now_taipei) meta.now_taipei = nowTaipeiStr_();
       meta.limit = meta.limit || limit;
       return jsonOk_({
         ok: true,
         data: questions,
         meta,
       });
+    }
+
+    if (action === 'debugAnswerKey') {
+      const q_id = String(params.q_id || '').trim();
+      if (!q_id) {
+        return buildCorsResponse_({ ok: false, message: 'q_id required', error_code: 'BAD_PARAMS' }, 400);
+      }
+      try {
+        const debug = debugAnswerKey_(q_id);
+        return jsonOk_(debug);
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
+      }
     }
 
     return jsonError_('unknown action: ' + action, 'UNKNOWN_ACTION');
@@ -236,4 +261,58 @@ function buildCorsResponse_(payload, status) {
 function normalizeOptionsList_(optionsStr) {
   const s = String(optionsStr || '').replace(/，/g, ',');
   return s.split(',').map(x => x.trim()).filter(Boolean);
+}
+
+function debugAnswerKey_(qId) {
+  const spreadsheetId = getSpreadsheetIdFromProps_();
+  if (!spreadsheetId) {
+    return { ok: false, message: 'Script Properties 缺少 SPREADSHEET_ID' };
+  }
+
+  const { sheet, headerMap } = ensureQuestionsSheet_();
+  const values = sheet.getDataRange().getValues();
+  const result = {
+    ok: true,
+    q_id: qId,
+    headerMap: headerMap,
+    sheetName: sheet.getName(),
+    spreadsheet_id: spreadsheetId,
+  };
+
+  if (values.length < 2) {
+    result.message = 'Questions sheet empty';
+    return result;
+  }
+
+  const getVal = (row, key) => {
+    const col = headerMap[key];
+    if (!col) return '';
+    return row[col - 1];
+  };
+
+  let foundRow = null;
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const rowQid = String(getVal(row, 'question_id') || '').trim();
+    if (rowQid === qId) {
+      foundRow = row;
+      break;
+    }
+  }
+
+  if (!foundRow) {
+    result.exists = false;
+    return result;
+  }
+
+  const ansRaw = getVal(foundRow, 'answer_key');
+  const optionsRaw = getVal(foundRow, 'options');
+
+  result.exists = true;
+  result.answer_key_raw = ansRaw;
+  result.answer_key_number = Number(ansRaw);
+  result.options_raw = optionsRaw;
+  result.explanation_raw = getVal(foundRow, 'explanation');
+
+  return result;
 }

@@ -10,6 +10,7 @@ const APP_CONFIG = {
     QUESTIONS: 'Questions',
     MASTERY: 'Mastery',
     LOGS: 'Logs',
+    MISTAKES: 'Mistakes',
   },
 
   TIMEZONE: 'Asia/Taipei',
@@ -48,15 +49,19 @@ const APP_CONFIG = {
 };
 
 function nowTaipeiStr_() {
-  return Utilities.formatDate(new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.TS_FORMAT);
+  return Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm:ss');
 }
 
 function nowTaipei_() {
   return nowTaipeiStr_();
 }
 
+function todayTaipeiStr_() {
+  return Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
+}
+
 function todayTaipei_() {
-  return Utilities.formatDate(new Date(), APP_CONFIG.TIMEZONE, APP_CONFIG.DATE_FORMAT);
+  return todayTaipeiStr_();
 }
 
 function formatTaipeiTs_(dateObj) {
@@ -78,10 +83,16 @@ function addDays_(dateObj, days) {
 }
 
 function getSpreadsheet_() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('SPREADSHEET_ID') || APP_CONFIG.SPREADSHEET_ID;
-  if (!id) throw new Error('Script Properties 缺少 SPREADSHEET_ID');
+  const id = getSpreadsheetIdFromProps_();
+  if (!id) {
+    throw new Error('Script Properties 缺少 SPREADSHEET_ID');
+  }
   return SpreadsheetApp.openById(id);
+}
+
+function getSpreadsheetIdFromProps_() {
+  const props = PropertiesService.getScriptProperties();
+  return props.getProperty('SPREADSHEET_ID') || '';
 }
 
 function getSheet_(name, createIfMissing) {
