@@ -208,49 +208,71 @@ function masteryPickQuestionsFromList_(userId, questionList, limit, nowDate) {
   const all = Array.isArray(questionList) ? questionList : [];
   const total = all.length;
   const now = nowDate || new Date();
-  const { map } = masteryLoadMap_(userId);
+  const { map: masteryMap } = masteryLoadMap_(userId);
+  const strikeMap = mistakesLoadMap_(userId);
+  const want = Math.min(Number(limit || APP_CONFIG.DEFAULT_LIMIT), total);
 
   // 1) 到期題
   const due = all.filter(q => {
-    const m = map.get(q.question_id);
+    const m = masteryMap.get(q.question_id);
     return m && isDue_(m.next_review_at, now) && !m.mastered;
   });
 
   // 2) 低等級（<=2）題（但不一定到期）
   const low = all.filter(q => {
-    const m = map.get(q.question_id);
+    const m = masteryMap.get(q.question_id);
     return m && !m.mastered && Number(m.strength_level || 1) <= APP_CONFIG.PICK_RULES.LOW_LEVEL_MAX_LEVEL;
   });
 
   // 3) 新題（從未作答）
-  const unseen = all.filter(q => !map.has(q.question_id));
+  const unseen = all.filter(q => !masteryMap.has(q.question_id));
+
+  // 高 strike 題（僅一般練習）
+  const highStrikeCap = Math.floor(want * 0.3);
+  const highStrike = (highStrikeCap > 0)
+    ? all.filter(q => {
+      const strike = strikeMap.get(q.question_id) || 0;
+      if (strike < 3) return false;
+      const m = masteryMap.get(q.question_id);
+      return !m || !m.mastered;
+    })
+    : [];
 
   // 4) 其他題（補隨機）
   const others = all.filter(q => true);
   const dueSet = new Set(due.map(q => q.question_id));
   const lowSet = new Set(low.map(q => q.question_id));
   const unseenSet = new Set(unseen.map(q => q.question_id));
+  const highStrikeSet = new Set(highStrike.map(q => q.question_id));
 
   const picked = [];
-  const want = Math.min(Number(limit || APP_CONFIG.DEFAULT_LIMIT), total);
+  let highStrikeUsed = 0;
 
-  function addUnique(list) {
+  function addUnique(list, { enforceHighStrikeCap = true } = {}) {
     for (const q of list) {
       if (picked.length >= want) break;
-      if (!picked.some(x => x.question_id === q.question_id)) picked.push(q);
+      const isHighStrike = highStrikeSet.has(q.question_id);
+      if (enforceHighStrikeCap && isHighStrike && highStrikeUsed >= highStrikeCap) continue;
+      if (!picked.some(x => x.question_id === q.question_id)) {
+        picked.push(q);
+        if (enforceHighStrikeCap && isHighStrike) highStrikeUsed += 1;
+      }
     }
   }
 
-  addUnique(due);
+  addUnique(due, { enforceHighStrikeCap: false });
+  if (picked.length < want && highStrikeCap > 0) addUnique(highStrike);
   if (picked.length < want) addUnique(low);
   if (picked.length < want) addUnique(unseen);
 
   if (picked.length < want) {
-    const remain = others.filter(q => !picked.some(x => x.question_id === q.question_id));
+    const remain = others
+      .filter(q => !picked.some(x => x.question_id === q.question_id))
+      .filter(q => highStrikeUsed < highStrikeCap || !highStrikeSet.has(q.question_id));
     addUnique(pickRandom_(remain, want - picked.length));
   }
 
-  const fillCount = picked.filter(q => !dueSet.has(q.question_id) && !lowSet.has(q.question_id) && !unseenSet.has(q.question_id)).length;
+  const fillCount = picked.filter(q => !dueSet.has(q.question_id) && !lowSet.has(q.question_id) && !unseenSet.has(q.question_id) && !highStrikeSet.has(q.question_id)).length;
 
   return {
     ok: true,

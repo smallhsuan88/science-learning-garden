@@ -22,10 +22,33 @@ function ensureQuestionsSheet_() {
   return { sheet: sh, headerMap };
 }
 
+function getQuestionsCacheVersion_() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty('QUESTIONS_CACHE_VER');
+  if (!raw) {
+    props.setProperty('QUESTIONS_CACHE_VER', '1');
+    return 1;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    props.setProperty('QUESTIONS_CACHE_VER', '1');
+    return 1;
+  }
+  return parsed;
+}
+
+function bumpQuestionsCacheVersion_() {
+  const props = PropertiesService.getScriptProperties();
+  const next = getQuestionsCacheVersion_() + 1;
+  props.setProperty('QUESTIONS_CACHE_VER', String(next));
+  return next;
+}
+
 function getQuestionsAll_() {
   // ✅ 使用 Cache 避免每次都全表讀取（可選）
   const cache = CacheService.getScriptCache();
-  const key = 'questions_all_v2';
+  const cacheVer = getQuestionsCacheVersion_();
+  const key = `questions_all_v${cacheVer}`;
   const cached = cache.get(key);
   if (cached) {
     try { return JSON.parse(cached); } catch (e) {}
