@@ -31,7 +31,7 @@ function handleRequest_(e, method) {
     }
 
     if (isProtectedAction_(action)) {
-      const auth = requireAuth_(params);
+      const auth = requireAuth_(params, e);
       if (!auth.ok) {
         return buildCorsResponse_(auth.payload, 401);
       }
@@ -279,7 +279,7 @@ function buildCorsResponse_(payload, status) {
   if (output.setHeader) {
     output.setHeader('Access-Control-Allow-Origin', '*');
     output.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    output.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Api-Key');
   }
   if (status && output.setResponseCode) {
     output.setResponseCode(status);

@@ -4,6 +4,7 @@
  */
 
 const API_CLIENT_API_KEY = 'REPLACE_WITH_API_KEY';
+const API_KEY_STORAGE_KEY = 'slg_api_key';
 
 class ApiClient {
   constructor(opts = {}) {
@@ -11,7 +12,14 @@ class ApiClient {
     this.stableBase = opts.stableBase || ''; // 若你有 googleusercontent 的穩定入口，可放這
     this.timeoutMs = Number(opts.timeoutMs || 8000);
     this.debug = !!opts.debug;
-    this.apiKey = opts.apiKey || API_CLIENT_API_KEY || '';
+    this.apiKeyStorageKey = API_KEY_STORAGE_KEY;
+
+    const storedApiKey = localStorage.getItem(this.apiKeyStorageKey);
+    const providedApiKey = opts.apiKey || API_CLIENT_API_KEY || '';
+    this.apiKey = (storedApiKey !== null ? storedApiKey : providedApiKey) || '';
+    if (storedApiKey === null) {
+      localStorage.setItem(this.apiKeyStorageKey, this.apiKey);
+    }
 
     // 用 localStorage 記住穩定入口（避免每次重貼）
     this.storageKey = 'slg_api_base_v1';
@@ -49,8 +57,9 @@ class ApiClient {
   _buildUrl(base, params = {}) {
     const u = new URL(base);
     Object.entries(params).forEach(([k, v]) => {
-      if (v === undefined || v === null || String(v).trim() === '') return;
-      u.searchParams.set(k, String(v));
+      if (v === undefined || v === null) return;
+      const str = String(v);
+      u.searchParams.set(k, str);
     });
     // bust cache
     u.searchParams.set('_', String(Date.now()));
@@ -144,7 +153,13 @@ class ApiClient {
 
   async _requestWithFallback(method, params, bodyObj) {
     const paramsWithAuth = Object.assign({}, params || {});
-    if (this.apiKey) paramsWithAuth.api_key = this.apiKey;
+    paramsWithAuth.api_key = this.apiKey;
+
+    let bodyWithAuth = bodyObj;
+    if (method === 'POST') {
+      bodyWithAuth = Object.assign({}, bodyObj || {});
+      bodyWithAuth.api_key = this.apiKey;
+    }
 
     const bases = [];
     const active = this.getActiveBase();
@@ -159,7 +174,7 @@ class ApiClient {
     let lastErr = null;
     for (const b of bases) {
       try {
-        const result = await this._requestOnce(method, b, paramsWithAuth, bodyObj);
+        const result = await this._requestOnce(method, b, paramsWithAuth, bodyWithAuth);
         // 成功就把它設為 active（穩定入口優先）
         this.setActiveBase(b);
         return result;
