@@ -3,8 +3,7 @@
  */
 
 function ensureQuestionsSheet_() {
-  const ss = getSpreadsheet_();
-  let sh = ss.getSheetByName(APP_CONFIG.SHEETS.QUESTIONS);
+  const sh = getSheet_(APP_CONFIG.SHEETS.QUESTIONS, false);
   if (!sh) throw new Error(`找不到題庫工作表：${APP_CONFIG.SHEETS.QUESTIONS}`);
   return sh;
 }

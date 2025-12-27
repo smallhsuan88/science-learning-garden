@@ -3,11 +3,7 @@
  */
 
 function ensureMasterySheet_() {
-  const ss = getSpreadsheet_();
-  let sh = ss.getSheetByName(APP_CONFIG.SHEETS.MASTERY);
-  if (!sh) {
-    sh = ss.insertSheet(APP_CONFIG.SHEETS.MASTERY);
-  }
+  const sh = getSheet_(APP_CONFIG.SHEETS.MASTERY, true);
 
   const headers = [
     'user_id',
@@ -112,7 +108,7 @@ function masteryComputeUpdate_(userId, qObj, chosenAnswer, isCorrect) {
   const { map, rowIndexByQid } = masteryLoadMap_(userId);
 
   const qid = qObj.question_id;
-  const nowTs = nowTaipei_();
+  const nowTs = nowTaipeiStr_();
 
   const prev = map.get(qid) || {
     user_id: userId,

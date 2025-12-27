@@ -26,7 +26,8 @@ function handleRequest_(e, method) {
     }
 
     if (action === 'ping') {
-      return jsonOk_({ ok: true, message: 'pong', ts: new Date().toISOString(), ts_taipei: nowTaipei_() });
+      const nowStr = nowTaipeiStr_();
+      return jsonOk_({ ok: true, message: 'pong', ts: nowStr, ts_taipei: nowStr });
     }
 
     if (action === 'getQuestions') {
@@ -60,18 +61,21 @@ function handleRequest_(e, method) {
       }
 
       try {
-        const nowStr = nowTaipei_();
+        const nowStr = nowTaipeiStr_();
+        const todayStr = todayTaipei_();
 
         // 找題目
         const q = getQuestionById_(q_id);
         if (!q) return buildCorsResponse_({ ok: false, message: 'question not found: ' + q_id, error_code: 'QUESTION_NOT_FOUND' }, 404);
 
-        const answer_key_norm = parseInt(String(q.answer_key).trim(), 10);
-        if (Number.isNaN(answer_key_norm)) {
+        const answer_key_norm = Number(String(q.answer_key).trim());
+        if (!Number.isFinite(answer_key_norm)) {
           return buildCorsResponse_({ ok: false, message: 'bad answer_key', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
         }
 
-        const isCorrect = (chosen_index_norm === answer_key_norm);
+        const ci = Number(chosen_index_norm);
+        const ak = Number(answer_key_norm);
+        const isCorrect = (ci === ak);
 
         // 預先計算 Mastery（實際寫入放在 ECS 之後）
         const masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
@@ -79,14 +83,15 @@ function handleRequest_(e, method) {
 
         // 寫入 Logs（使用正規化後的 chosen_index）
         const logOk = appendLog_({
+          timestamp: nowStr,
           ts_taipei: nowStr,
           user_id,
           q_id,
           grade: q.grade,
           unit: q.unit,
           difficulty: q.difficulty,
-          chosen_answer: chosen_index_norm,
-          answer_key: answer_key_norm,
+          chosen_answer: ci,
+          answer_key: ak,
           is_correct: isCorrect,
           strength_before: mastery.strength_before,
           strength_after: mastery.strength_after,
@@ -104,20 +109,20 @@ function handleRequest_(e, method) {
           ecsUpsertOnWrong(
             user_id,
             q_id,
-            chosen_index_norm,
+            ci,
             chosenText,
             q.explanation || '',
+            nowStr,
             {
               knowledge_tag: q.unit || '',
               remedial_card_text: q.explanation || '',
               remedial_asset_url: '',
               importance_weight: 1,
-            },
-            nowStr
+            }
           );
           ecsStatus = 'active';
         } else {
-          const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr);
+          const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
           if (ecsUpdate && ecsUpdate.status) {
             ecsStatus = ecsUpdate.status;
           }
@@ -132,8 +137,10 @@ function handleRequest_(e, method) {
         return buildCorsResponse_({
           ok: true,
           q_id,
-          recorded: !!logOk,
+          recorded: !!(logOk && logOk.ok !== false),
+          recorded_message: logOk && logOk.message ? logOk.message : undefined,
           is_correct: isCorrect,
+          now_taipei: nowStr,
           explanation: q.explanation || '',
           ecs_status: ecsStatus,
           ecs_streak: ecsStreak,

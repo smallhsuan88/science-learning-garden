@@ -3,12 +3,9 @@
  */
 
 function ensureLogsSheet_() {
-  const ss = getSpreadsheet_();
-  let sh = ss.getSheetByName(APP_CONFIG.SHEETS.LOGS);
-  if (!sh) {
-    sh = ss.insertSheet(APP_CONFIG.SHEETS.LOGS);
-  }
+  const sh = getSheet_(APP_CONFIG.SHEETS.LOGS, true);
   const headers = [
+    'timestamp',
     'ts_taipei',
     'user_id',
     'q_id',
@@ -24,41 +21,41 @@ function ensureLogsSheet_() {
     'client_ip',
     'user_agent',
   ];
-
-  const lastCol = sh.getLastColumn();
-  const firstRow = sh.getRange(1, 1, 1, Math.max(lastCol, headers.length)).getValues()[0];
-  const isEmpty = sh.getLastRow() === 0 || firstRow.every(v => v === '');
-  if (isEmpty) {
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sh.setFrozenRows(1);
-  }
-  return sh;
+  const headerMap = ensureHeaders_(sh, headers);
+  if (sh.getFrozenRows() < 1) sh.setFrozenRows(1);
+  return { sheet: sh, headerMap };
 }
 
 function appendLog_(logObj) {
-  const sh = ensureLogsSheet_();
-  const row = [
-    logObj.ts_taipei || nowTaipei_(),
-    logObj.user_id || '',
-    logObj.q_id || '',
-    logObj.grade ?? '',
-    logObj.unit || '',
-    logObj.difficulty || '',
-    logObj.chosen_answer ?? '',
-    logObj.answer_key ?? '',
-    logObj.is_correct ? 'TRUE' : 'FALSE',
-    logObj.strength_before ?? '',
-    logObj.strength_after ?? '',
-    logObj.next_review_at || '',
-    logObj.client_ip || '',
-    logObj.user_agent || '',
-  ];
-  sh.appendRow(row);
-  return true;
+  try {
+    const { sheet, headerMap } = ensureLogsSheet_();
+    const ts = logObj.timestamp || logObj.ts_taipei || nowTaipeiStr_();
+    const rowObj = {
+      timestamp: ts,
+      ts_taipei: ts,
+      user_id: logObj.user_id || '',
+      q_id: logObj.q_id || '',
+      grade: logObj.grade ?? '',
+      unit: logObj.unit || '',
+      difficulty: logObj.difficulty || '',
+      chosen_answer: logObj.chosen_answer ?? '',
+      answer_key: logObj.answer_key ?? '',
+      is_correct: logObj.is_correct ? 'TRUE' : 'FALSE',
+      strength_before: logObj.strength_before ?? '',
+      strength_after: logObj.strength_after ?? '',
+      next_review_at: logObj.next_review_at || '',
+      client_ip: logObj.client_ip || '',
+      user_agent: logObj.user_agent || '',
+    };
+    appendRowByHeaders_(sheet, headerMap, rowObj);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String(err && err.message ? err.message : err) };
+  }
 }
 
 function getLatestLog_(userId) {
-  const sh = ensureLogsSheet_();
+  const { sheet: sh } = ensureLogsSheet_();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
 
@@ -67,7 +64,7 @@ function getLatestLog_(userId) {
   const idx = (name) => headers.indexOf(name);
 
   const iUser = idx('user_id');
-  const iTs = idx('ts_taipei');
+  const iTs = idx('timestamp') >= 0 ? idx('timestamp') : idx('ts_taipei');
   const iQid = idx('q_id');
   const iCorrect = idx('is_correct');
 

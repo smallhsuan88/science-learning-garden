@@ -167,7 +167,7 @@ class QuizUI {
     };
   }
 
-  showResult({ ok, is_correct, explanation, recorded, need_remedial, msg } = {}) {
+  showResult({ ok, is_correct, explanation, recorded, recorded_message, need_remedial, msg } = {}) {
     const area = document.getElementById('resultArea');
     const expBox = document.getElementById('expBox');
     const expText = document.getElementById('expText');
@@ -183,7 +183,7 @@ class QuizUI {
     const icon = is_correct ? '✅' : '❌';
     const txt = is_correct ? '答對了！' : '答錯了！';
     const cls = is_correct ? 'ok' : 'bad';
-    const rec = recorded ? '已記錄' : '未記錄';
+    const rec = recorded ? '已記錄' : `未記錄${recorded_message ? `：${escapeHtml_(recorded_message)}` : ''}`;
 
     const remedial = need_remedial
       ? `<div class="meta"><span class="warn">此題觸發降級／懲罰復習：</span>建議立刻讀解析並做一次主動回憶。</div>`
@@ -191,7 +191,7 @@ class QuizUI {
 
     area.innerHTML = `
       <div class="meta"><span class="${cls}">${icon} ${txt}</span></div>
-      <div class="meta">${escapeHtml_(rec)}</div>
+      <div class="meta">${rec}</div>
       ${remedial}
     `;
 
