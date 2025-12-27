@@ -109,6 +109,25 @@ function appendRowByHeaders_(sheet, headerMap, obj) {
   return sheet.getLastRow();
 }
 
+function appendRowsByHeaders_(sheet, headerMap, objList) {
+  if (!Array.isArray(objList) || objList.length === 0) return [];
+  const lastCol = sheet.getLastColumn();
+  const rows = objList.map(obj => {
+    const row = new Array(lastCol).fill('');
+    Object.keys(obj || {}).forEach(k => {
+      const col = headerMap[k];
+      if (!col) return;
+      row[col - 1] = obj[k];
+    });
+    return row;
+  });
+
+  const startRow = sheet.getLastRow() + 1;
+  const range = sheet.getRange(startRow, 1, rows.length, lastCol);
+  range.setValues(rows);
+  return rows.map((_, idx) => startRow + idx);
+}
+
 function safeNumber_(v, fallback) {
   const n = Number(v);
   return isNaN(n) ? (fallback ?? 0) : n;
@@ -154,14 +173,21 @@ function ecsEnsureEventsSheet_() {
 }
 
 function ecsAppendEvent_(eventObj) {
+  ecsAppendEvents_([eventObj]);
+}
+
+function ecsAppendEvents_(eventObjList) {
+  const validEvents = (Array.isArray(eventObjList) ? eventObjList : []).filter(ev => ev);
+  if (validEvents.length === 0) return [];
   const { sheet, headerMap } = ecsEnsureEventsSheet_();
-  appendRowByHeaders_(sheet, headerMap, {
+  const rows = validEvents.map(eventObj => ({
     user_id: eventObj.user_id,
     q_id: eventObj.q_id,
     event_type: eventObj.event_type,
     payload_json: JSON.stringify(eventObj.payload_json || {}),
     timestamp: eventObj.timestamp || nowTaipeiStr_()
-  });
+  }));
+  return appendRowsByHeaders_(sheet, headerMap, rows);
 }
 
 function ecsGetRecentEvents_(userId, daysLimit, maxRows) {
@@ -397,10 +423,13 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
   };
 
   setRowByMap_(sh, found.row, headerMap, updateObj);
-  logEcsEvent_(userId, qId, 'ecs_correct', { streak, today, row: found.row }, nowStr);
+  const eventsToLog = [
+    { user_id: userId, q_id: qId, event_type: 'ecs_correct', payload_json: { streak, today, row: found.row }, timestamp: nowStr }
+  ];
   if (graduated) {
-    logEcsEvent_(userId, qId, 'ecs_graduate', { streak, today, row: found.row }, nowStr);
+    eventsToLog.push({ user_id: userId, q_id: qId, event_type: 'ecs_graduate', payload_json: { streak, today, row: found.row }, timestamp: nowStr });
   }
+  ecsAppendEvents_(eventsToLog);
 
   return {
     ok: true,
