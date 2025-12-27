@@ -30,6 +30,13 @@ function handleRequest_(e, method) {
       return jsonOk_({ ok: true, message: 'pong', ts: nowStr, ts_taipei: nowStr });
     }
 
+    if (isProtectedAction_(action)) {
+      const auth = requireAuth_(params);
+      if (!auth.ok) {
+        return buildCorsResponse_(auth.payload, 401);
+      }
+    }
+
     if (action === 'getQuestions') {
       const user_id = String(params.user_id || 'u001').trim();
       const limit = Number(params.limit || APP_CONFIG.DEFAULT_LIMIT);
@@ -169,6 +176,21 @@ function handleRequest_(e, method) {
       const user_id = String(params.user_id || 'u001').trim();
       const latest = getLatestLog_(user_id);
       return jsonOk_({ ok: true, latest, ts_taipei: nowTaipeiStr_() });
+    }
+
+    if (action === 'resetUser') {
+      const user_id = String(params.user_id || '').trim();
+      if (!user_id) {
+        return buildCorsResponse_({ ok: false, message: 'user_id required', error_code: 'BAD_PARAMS' }, 400);
+      }
+      const purgeEvents = String(params.purge_events || '').trim() === '1';
+      try {
+        const result = resetUserData_(user_id, { purgeEvents });
+        return jsonOk_(result);
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
+      }
     }
 
     if (action === 'getEcsQueue') {
