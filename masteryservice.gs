@@ -228,7 +228,7 @@ function masteryPickQuestionsFromList_(userId, questionList, limit, nowDate) {
   const unseen = all.filter(q => !masteryMap.has(q.question_id));
 
   // 高 strike 題（僅一般練習）
-  const highStrikeCap = Math.floor(want * 0.3);
+  const highStrikeCap = Math.floor(want * 0.1);
   const highStrike = (highStrikeCap > 0)
     ? all.filter(q => {
       const strike = strikeMap.get(q.question_id) || 0;

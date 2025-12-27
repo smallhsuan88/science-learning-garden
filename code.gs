@@ -178,6 +178,20 @@ function handleRequest_(e, method) {
       return jsonOk_({ ok: true, latest, ts_taipei: nowTaipeiStr_() });
     }
 
+    if (action === 'getLearningReport') {
+      const user_id = String(params.user_id || '').trim();
+      if (!user_id) {
+        return buildCorsResponse_({ ok: false, message: 'user_id required', error_code: 'BAD_PARAMS' }, 400);
+      }
+      try {
+        const report = getLearningReport_(user_id, params.days);
+        return buildCorsResponse_(report);
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
+      }
+    }
+
     if (action === 'resetUser') {
       const user_id = String(params.user_id || '').trim();
       if (!user_id) {
