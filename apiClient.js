@@ -3,12 +3,15 @@
  * - timeout、fallback、簡易 debug
  */
 
+const API_CLIENT_API_KEY = 'REPLACE_WITH_API_KEY';
+
 class ApiClient {
   constructor(opts = {}) {
     this.primaryBase = opts.primaryBase || '';
     this.stableBase = opts.stableBase || ''; // 若你有 googleusercontent 的穩定入口，可放這
     this.timeoutMs = Number(opts.timeoutMs || 8000);
     this.debug = !!opts.debug;
+    this.apiKey = opts.apiKey || API_CLIENT_API_KEY || '';
 
     // 用 localStorage 記住穩定入口（避免每次重貼）
     this.storageKey = 'slg_api_base_v1';
@@ -140,6 +143,9 @@ class ApiClient {
   }
 
   async _requestWithFallback(method, params, bodyObj) {
+    const paramsWithAuth = Object.assign({}, params || {});
+    if (this.apiKey) paramsWithAuth.api_key = this.apiKey;
+
     const bases = [];
     const active = this.getActiveBase();
     if (active) bases.push(active);
@@ -153,7 +159,7 @@ class ApiClient {
     let lastErr = null;
     for (const b of bases) {
       try {
-        const result = await this._requestOnce(method, b, params, bodyObj);
+        const result = await this._requestOnce(method, b, paramsWithAuth, bodyObj);
         // 成功就把它設為 active（穩定入口優先）
         this.setActiveBase(b);
         return result;
