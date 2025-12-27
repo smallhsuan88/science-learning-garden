@@ -265,7 +265,7 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
   const headerMap = ensureHeaders_(sh, requiredHeaders);
 
   const nowStr = nowTaipeiStr || nowTaipeiStr_();
-  const today = todayStr || todayTaipei_();
+  const today = todayStr || todayTaipeiStr_();
 
   const found = findEcsRow_(sh, headerMap, userId, qId);
   if (found.row === -1) {
@@ -284,8 +284,8 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
   const lastCorrectDate = String(getCell_(rowVals, headerMap, 'graduation_last_correct_date') || '').trim();
   let streak = safeNumber_(getCell_(rowVals, headerMap, 'graduation_correct_days_streak'), 0);
 
-  let eventType = 'ecs_correct';
   let newStatus = status;
+  let graduated = false;
 
   if (lastCorrectDate !== today) {
     streak += 1;
@@ -293,7 +293,7 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
 
   if (streak >= 3) {
     newStatus = 'graduated';
-    eventType = 'ecs_graduate';
+    graduated = true;
   }
 
   const importanceWeight = safeNumber_(getCell_(rowVals, headerMap, 'importance_weight'), 1);
@@ -310,7 +310,10 @@ function ecsUpdateOnCorrect(userId, qId, nowTaipeiStr, todayStr) {
   };
 
   setRowByMap_(sh, found.row, headerMap, updateObj);
-  logEcsEvent_(userId, qId, eventType, { streak, today, row: found.row }, nowStr);
+  logEcsEvent_(userId, qId, 'ecs_correct', { streak, today, row: found.row }, nowStr);
+  if (graduated) {
+    logEcsEvent_(userId, qId, 'ecs_graduate', { streak, today, row: found.row }, nowStr);
+  }
 
   return {
     ok: true,
