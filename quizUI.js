@@ -19,6 +19,7 @@ class QuizUI {
     this.el.btnPing = $('btnPing');
     this.el.btnLoad = $('btnLoad');
     this.el.btnLoadAll = $('btnLoadAll');
+    this.el.btnEcsQueue = $('btnEcsQueue');
 
     this.el.btnStable = $('btnStable');
     this.el.btnClearCache = $('btnClearCache');
@@ -29,6 +30,9 @@ class QuizUI {
     this.el.apiStatus = $('apiStatus');
     this.el.statusLine = $('statusLine');
     this.el.sessionLabel = $('sessionLabel');
+    this.el.modeLabel = $('modeLabel');
+    this.el.ecsRemainBox = $('ecsRemainBox');
+    this.el.ecsRemain = $('ecsRemain');
 
     this.el.totalCount = $('totalCount');
     this.el.doneCount = $('doneCount');
@@ -47,6 +51,7 @@ class QuizUI {
     this.el.btnPing.addEventListener('click', () => this.handlers.onPing?.());
     this.el.btnLoad.addEventListener('click', () => this.handlers.onLoad?.(false));
     this.el.btnLoadAll.addEventListener('click', () => this.handlers.onLoad?.(true));
+    this.el.btnEcsQueue.addEventListener('click', () => this.handlers.onLoadEcsQueue?.());
     this.el.btnStable.addEventListener('click', () => this.handlers.onGetStable?.());
     this.el.btnClearCache.addEventListener('click', () => this.handlers.onClearCache?.());
     this.el.btnFinish.addEventListener('click', () => this.handlers.onFinish?.());
@@ -77,6 +82,17 @@ class QuizUI {
   }
 
   setSessionLabel(text) { this.el.sessionLabel.textContent = text || ''; }
+  setMode({ mode = 'standard', ecsMeta = null } = {}) {
+    const isEcs = mode === 'ecs';
+    this.el.modeLabel.textContent = isEcs ? '錯題複習' : '一般練習';
+    if (this.el.ecsRemainBox) {
+      this.el.ecsRemainBox.style.display = isEcs ? 'inline-flex' : 'none';
+    }
+    if (isEcs && this.el.ecsRemain) {
+      const remain = ecsMeta && ecsMeta.total_active !== undefined ? ecsMeta.total_active : (ecsMeta && ecsMeta.count) || 0;
+      this.el.ecsRemain.textContent = String(remain);
+    }
+  }
 
   setProgress({ total = 0, done = 0, correct = 0 } = {}) {
     this.el.totalCount.textContent = String(total);

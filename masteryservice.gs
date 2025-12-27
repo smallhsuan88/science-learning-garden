@@ -18,6 +18,7 @@ function ensureMasterySheet_() {
     'total_attempts',
     'last_result',        // correct/wrong
     'last_answered_at',   // 台灣時間字串
+    'last_correct_date',  // yyyy-MM-dd（台北）
     'mastered',           // TRUE/FALSE
     'updated_at',         // 台灣時間字串
   ];
@@ -58,6 +59,7 @@ function masteryLoadMap_(userId) {
   const i_total = idx('total_attempts');
   const i_last = idx('last_result');
   const i_lastAt = idx('last_answered_at');
+  const i_lastCorrect = idx('last_correct_date');
   const i_mastered = idx('mastered');
 
   const map = new Map();
@@ -78,6 +80,7 @@ function masteryLoadMap_(userId) {
       total_attempts: Number(row[i_total] || 0),
       last_result: String(row[i_last] || '').trim(),
       last_answered_at: String(row[i_lastAt] || '').trim(),
+      last_correct_date: String(row[i_lastCorrect] || '').trim(),
       mastered: String(row[i_mastered] || '').toUpperCase() === 'TRUE',
     });
     rowIndexByQid.set(qid, r + 1); // sheet row number (1-based)
@@ -114,6 +117,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
     total_attempts: 0,
     last_result: '',
     last_answered_at: '',
+    last_correct_date: '',
     mastered: false,
   };
 
@@ -124,11 +128,14 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
   let strengthAfter = strengthBefore;
   let mastered = !!prev.mastered;
   let correctStreak = Number(prev.correct_streak || 0);
+  let lastCorrectDate = String(prev.last_correct_date || '').trim();
 
   if (isCorrect) {
     correctStreak += 1;
     // 新題目第一次答對仍維持 Level 1（符合驗收）；之後再答對才升級
     strengthAfter = isNew ? 1 : Math.min(5, strengthBefore + 1);
+
+    lastCorrectDate = todayTaipei_();
 
     if (strengthAfter === 5 && APP_CONFIG.MARK_MASTERED_ON_LEVEL5_CORRECT) {
       mastered = true;
@@ -156,6 +163,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
     totalAttempts,
     isCorrect ? 'correct' : 'wrong',
     nowTs,
+    lastCorrectDate,
     mastered ? 'TRUE' : 'FALSE',
     nowTs,
   ];
@@ -174,6 +182,7 @@ function masteryUpdateAfterAnswer_(userId, qObj, chosenAnswer, isCorrect) {
     next_review_at: nextReviewAt,
     mastered: mastered,
     last_answered_at: nowTs,
+    last_correct_date: lastCorrectDate,
     last_result: isCorrect ? 'correct' : 'wrong',
     total_attempts: totalAttempts,
     correct_streak: correctStreak,

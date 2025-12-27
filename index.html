@@ -111,12 +111,15 @@
           <button class="btn" id="btnPing">Ping API</button>
           <button class="btn primary" id="btnLoad">載入題目</button>
           <button class="btn warn" id="btnLoadAll">載入全部（忽略篩選）</button>
+          <button class="btn" id="btnEcsQueue">錯題複習</button>
         </div>
       </div>
 
       <div class="statusLine" id="statusLine">
         <span class="pill">API：<b id="apiLabel" class="mono">（未設定）</b></span>
         <span class="pill">狀態：<b id="apiStatus">尚未連線</b></span>
+        <span class="pill">模式：<b id="modeLabel">一般練習</b></span>
+        <span class="pill" id="ecsRemainBox" style="display:none;">剩餘錯題數：<b id="ecsRemain">0</b></span>
         <span class="pill">本機 Session：<b id="sessionLabel">未開始</b></span>
       </div>
 

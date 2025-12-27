@@ -46,92 +46,95 @@ function handleRequest_(e, method) {
     if (action === 'submitAnswer') {
       const user_id = String(params.user_id || 'u001').trim();
       const q_id = String(params.q_id || '').trim();
-      const chosen_index = Number(params.chosen_index);
-
-      if (!q_id || Number.isNaN(chosen_index)) {
-        return jsonError_('missing q_id or chosen_index');
+      const chosenRaw = params.chosen_index;
+      if (chosenRaw === undefined || chosenRaw === null || String(chosenRaw).trim() === '') {
+        return buildCorsResponse_({ ok: false, error: 'chosen_index required' });
       }
 
-      const nowStr = nowTaipei_();
+      const chosen_index = Number(chosenRaw);
+      if (!Number.isInteger(chosen_index) || chosen_index < 0 || chosen_index > 3) {
+        return buildCorsResponse_({ ok: false, error: 'chosen_index required' });
+      }
+      if (!q_id) {
+        return buildCorsResponse_({ ok: false, error: 'q_id required' });
+      }
 
-      // 找題目
-      const q = getQuestionById_(q_id);
-      if (!q) return jsonError_('question not found: ' + q_id);
+      try {
+        const nowStr = nowTaipei_();
 
-      const answerKey = Number(q.answer_key);
-      const isCorrect = (chosen_index === answerKey);
+        // 找題目
+        const q = getQuestionById_(q_id);
+        if (!q) return buildCorsResponse_({ ok: false, error: 'question not found: ' + q_id });
 
-      // 更新 Mastery（計算下一次複習時間/等級）
-      const mastery = masteryUpdateAfterAnswer_(user_id, q, chosen_index, isCorrect);
+        const answerKey = Number(q.answer_key);
+        const isCorrect = (chosen_index === answerKey);
 
-      // 寫入 Logs
-      const logOk = appendLog_({
-        ts_taipei: nowStr,
-        user_id,
-        q_id,
-        grade: q.grade,
-        unit: q.unit,
-        difficulty: q.difficulty,
-        chosen_answer: chosen_index,
-        answer_key: answerKey,
-        is_correct: isCorrect,
-        strength_before: mastery.strength_before,
-        strength_after: mastery.strength_after,
-        next_review_at: mastery.next_review_at,
-        client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
-        user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
-      });
+        // 更新 Mastery（計算下一次複習時間/等級）
+        const mastery = masteryUpdateAfterAnswer_(user_id, q, chosen_index, isCorrect);
 
-      let ecsStatus = 'none';
-      let ecsStreak = undefined;
-      let ecsResp = null;
-
-      if (!isCorrect) {
-        const options = String(q.options || '').split(',').map(s => s.trim());
-        const chosenText = options[chosen_index] || '';
-        ecsResp = ecsUpsertOnWrong(
+        // 寫入 Logs
+        const logOk = appendLog_({
+          ts_taipei: nowStr,
           user_id,
           q_id,
-          chosen_index,
-          chosenText,
-          q.explanation || '',
-          {
-            knowledge_tag: q.unit || '',
-            remedial_card_text: q.explanation || '',
-            remedial_asset_url: '',
-            importance_weight: 1,
-          },
-          nowStr
-        );
-        ecsStatus = 'active';
-      } else {
-        const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr);
-        ecsResp = ecsUpdate;
-        if (ecsUpdate && ecsUpdate.status) {
-          ecsStatus = ecsUpdate.status;
+          grade: q.grade,
+          unit: q.unit,
+          difficulty: q.difficulty,
+          chosen_answer: chosen_index,
+          answer_key: answerKey,
+          is_correct: isCorrect,
+          strength_before: mastery.strength_before,
+          strength_after: mastery.strength_after,
+          next_review_at: mastery.next_review_at,
+          client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
+          user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
+        });
+
+        let ecsStatus = 'none';
+        let ecsStreak = null;
+
+        if (!isCorrect) {
+          const options = String(q.options || '').split(',').map(s => s.trim());
+          const chosenText = options[chosen_index] || '';
+          ecsUpsertOnWrong(
+            user_id,
+            q_id,
+            chosen_index,
+            chosenText,
+            q.explanation || '',
+            {
+              knowledge_tag: q.unit || '',
+              remedial_card_text: q.explanation || '',
+              remedial_asset_url: '',
+              importance_weight: 1,
+            },
+            nowStr
+          );
+          ecsStatus = 'active';
+        } else {
+          const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr);
+          if (ecsUpdate && ecsUpdate.status) {
+            ecsStatus = ecsUpdate.status;
+          }
+          if (ecsUpdate && ecsUpdate.streak !== undefined) {
+            ecsStreak = ecsUpdate.streak;
+          }
         }
-        if (ecsUpdate && ecsUpdate.streak !== undefined) {
-          ecsStreak = ecsUpdate.streak;
-        }
+
+        return buildCorsResponse_({
+          ok: true,
+          q_id,
+          recorded: !!logOk,
+          is_correct: isCorrect,
+          explanation: q.explanation || '',
+          ecs_status: ecsStatus,
+          ecs_streak: ecsStreak,
+          need_remedial: !isCorrect && mastery.strength_before >= 4,
+        });
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        return buildCorsResponse_({ ok: false, error: msg });
       }
-
-      // need_remedial：Level>=4 答錯觸發（也可以改成任何錯都觸發）
-      const needRemedial = (!isCorrect && mastery.strength_before >= 4);
-
-      return jsonOk_({
-        ok: true,
-        q_id,
-        is_correct: isCorrect,
-        correct_answer: answerKey,
-        explanation: q.explanation || '',
-        recorded: !!logOk,
-        need_remedial: needRemedial,
-        mastery,
-        ts_taipei: nowStr,
-        ecs_status: ecsStatus,
-        ecs_streak: ecsStreak,
-        ecs: ecsResp,
-      });
     }
 
     if (action === 'getLatestLog') {
@@ -144,12 +147,22 @@ function handleRequest_(e, method) {
       const user_id = String(params.user_id || 'u001').trim();
       const limit = Number(params.limit || 30);
       const queue = ecsGetQueue(user_id, limit);
-      const qSet = new Set(queue.q_ids || []);
-      const questions = getQuestionsByIds_(qSet);
+      const qIds = Array.isArray(queue.q_ids) ? queue.q_ids : [];
+      const allQuestions = getQuestionsAll_();
+      const mapById = new Map(allQuestions.map(q => [q.question_id, q]));
+      const questions = [];
+      qIds.forEach(id => {
+        const q = mapById.get(id);
+        if (q) questions.push(q);
+      });
+      const meta = queue.meta || {};
+      if (meta.total_active === undefined) meta.total_active = questions.length;
+      if (!meta.now_taipei) meta.now_taipei = nowTaipei_();
+      meta.limit = meta.limit || limit;
       return jsonOk_({
         ok: true,
         data: questions,
-        meta: queue.meta || {},
+        meta,
       });
     }
 
