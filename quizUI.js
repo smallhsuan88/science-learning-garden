@@ -178,6 +178,8 @@ class QuizUI {
       if (!checked) return null;
       return Number(checked.value);
     };
+
+    this.setSubmittingState({ submitting: false, answered: !!q.answered });
   }
 
   showResult({ ok, is_correct, explanation, recorded, recorded_message, need_remedial, msg } = {}) {
@@ -253,6 +255,29 @@ class QuizUI {
   _parseOptions(optionsStr) {
     const s = String(optionsStr || '').replace(/，/g, ',');
     return s.split(',').map(x => x.trim()).filter(Boolean);
+  }
+
+  setSubmittingState({ submitting = false, answered = false, loadingText = '' } = {}) {
+    const btnSubmit = document.getElementById('btnSubmit');
+    const btnNext = document.getElementById('btnNext');
+    const opts = this.el.quizArea?.querySelectorAll('input[name="opt"]') || [];
+
+    const disableOpts = submitting || answered;
+    opts.forEach(input => { input.disabled = disableOpts; });
+
+    if (btnSubmit) {
+      btnSubmit.disabled = disableOpts;
+      btnSubmit.textContent = submitting ? (loadingText || '判定中...') : '送出';
+    }
+
+    if (btnNext) {
+      btnNext.disabled = submitting;
+    }
+
+    if (submitting) {
+      const area = document.getElementById('resultArea');
+      if (area) area.innerHTML = `<div class="meta">${escapeHtml_(loadingText || '判定中...')}</div>`;
+    }
   }
 }
 

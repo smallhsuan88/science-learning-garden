@@ -81,3 +81,34 @@ function getLatestLog_(userId) {
   }
   return null;
 }
+
+function findRecentDuplicateLog_(userId, qId, secondsWindow) {
+  const { sheet: sh, headerMap } = ensureLogsSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const rowsToCheck = Math.min(Math.max(1, lastRow - 1), 200);
+  const startRow = Math.max(2, lastRow - rowsToCheck + 1);
+  const values = sh.getRange(startRow, 1, rowsToCheck, sh.getLastColumn()).getValues();
+
+  const idx = (name) => headerMap[name] ? headerMap[name] - 1 : -1;
+  const iUser = idx('user_id');
+  const iQid = idx('q_id');
+  const iTs = idx('ts_taipei') >= 0 ? idx('ts_taipei') : idx('timestamp');
+  const cutoff = new Date(Date.now() - (Math.max(1, secondsWindow || 10) * 1000));
+
+  for (let i = values.length - 1; i >= 0; i--) {
+    const row = values[i];
+    if (iUser >= 0 && String(row[iUser] || '').trim() !== String(userId || '').trim()) continue;
+    if (iQid >= 0 && String(row[iQid] || '').trim() !== String(qId || '').trim()) continue;
+    if (iTs < 0) continue;
+
+    const tsStr = row[iTs];
+    const ts = parseTaipeiTimestamp_(tsStr) || new Date(tsStr);
+    if (!ts || isNaN(ts.getTime())) continue;
+    if (ts < cutoff) break;
+
+    return { row: startRow + i, ts_taipei: tsStr };
+  }
+  return null;
+}
