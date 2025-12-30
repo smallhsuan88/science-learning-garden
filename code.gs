@@ -85,65 +85,97 @@ function handleRequest_(e, method) {
         const ak = Number(answer_key_norm);
         const isCorrect = (ci === ak);
 
+        const duplicate = findRecentDuplicateLog_(user_id, q_id, 10);
+        if (duplicate) {
+          return buildCorsResponse_({
+            ok: true,
+            duplicated: true,
+            q_id,
+            is_correct: isCorrect,
+            now_taipei: nowStr,
+            explanation: q.explanation || '',
+            chosen_index_norm,
+            answer_key_norm,
+            debug: {
+              duplicate_ts: duplicate.ts_taipei,
+              q_id,
+            },
+          });
+        }
+
         // 預先計算 Mastery（實際寫入放在 ECS 之後）
         const masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
         const mastery = masteryPlan.summary;
 
         // 寫入 Logs（使用正規化後的 chosen_index）
-        const logOk = appendLog_({
-          timestamp: nowStr,
-          ts_taipei: nowStr,
-          user_id,
-          q_id,
-          grade: q.grade,
-          unit: q.unit,
-          difficulty: q.difficulty,
-          chosen_answer: ci,
-          answer_key: ak,
-          is_correct: isCorrect,
-          strength_before: mastery.strength_before,
-          strength_after: mastery.strength_after,
-          next_review_at: mastery.next_review_at,
-          client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
-          user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
-        });
+        let logOk = { ok: false };
+        try {
+          logOk = appendLog_({
+            timestamp: nowStr,
+            ts_taipei: nowStr,
+            user_id,
+            q_id,
+            grade: q.grade,
+            unit: q.unit,
+            difficulty: q.difficulty,
+            chosen_answer: ci,
+            answer_key: ak,
+            is_correct: isCorrect,
+            strength_before: mastery.strength_before,
+            strength_after: mastery.strength_after,
+            next_review_at: mastery.next_review_at,
+            client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
+            user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
+          });
+        } catch (logErr) {
+          logOk = { ok: false, message: String(logErr && logErr.message ? logErr.message : logErr) };
+        }
 
         let ecsStatus = 'none';
         let ecsStreak = null;
 
         if (!isCorrect) {
-          mistakesUpsertOnWrong(user_id, q_id, todayStr);
-          const options = normalizeOptionsList_(q.options);
-          const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
-            ? String(params.chosen_text)
-            : (options[ci] || '');
-          ecsUpsertOnWrong(
-            user_id,
-            q_id,
-            ci,
-            chosenText,
-            q.explanation || '',
-            nowStr,
-            {
-              knowledge_tag: q.unit || '',
-              remedial_card_text: q.explanation || '',
-              remedial_asset_url: '',
-              importance_weight: 1,
-            }
-          );
-          ecsStatus = 'active';
+          try {
+            mistakesUpsertOnWrong(user_id, q_id, todayStr);
+          } catch (mistakeErr) {}
+
+          try {
+            const options = normalizeOptionsList_(q.options);
+            const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
+              ? String(params.chosen_text)
+              : (options[ci] || '');
+            ecsUpsertOnWrong(
+              user_id,
+              q_id,
+              ci,
+              chosenText,
+              q.explanation || '',
+              nowStr,
+              {
+                knowledge_tag: q.unit || '',
+                remedial_card_text: q.explanation || '',
+                remedial_asset_url: '',
+                importance_weight: 1,
+              }
+            );
+            ecsStatus = 'active';
+          } catch (ecsErr) {}
         } else {
-          const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
-          if (ecsUpdate && ecsUpdate.status) {
-            ecsStatus = ecsUpdate.status;
-          }
-          if (ecsUpdate && ecsUpdate.streak !== undefined) {
-            ecsStreak = ecsUpdate.streak;
-          }
+          try {
+            const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
+            if (ecsUpdate && ecsUpdate.status) {
+              ecsStatus = ecsUpdate.status;
+            }
+            if (ecsUpdate && ecsUpdate.streak !== undefined) {
+              ecsStreak = ecsUpdate.streak;
+            }
+          } catch (ecsCorrectErr) {}
         }
 
         // 更新 Mastery（ECS 處理完成後才寫入）
-        masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
+        try {
+          masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
+        } catch (masteryErr) {}
 
         return buildCorsResponse_({
           ok: true,

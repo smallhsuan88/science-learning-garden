@@ -22,6 +22,7 @@ class MemoryEngine {
       finished: false,
       lastSessionSummary: null,
       lastDebug: {},
+      isSubmitting: false,
     };
   }
 
@@ -182,7 +183,7 @@ class MemoryEngine {
       const { json, url } = await this.api.get(params);
 
       const list = Array.isArray(json.data) ? json.data : [];
-      this.state.questions = list;
+      this.state.questions = list.map(q => ({ ...q, answered: false }));
       this.state.index = 0;
       this.state.done = 0;
       this.state.correct = 0;
@@ -222,7 +223,7 @@ class MemoryEngine {
       const { json, url } = await this.api.get(params);
 
       const list = Array.isArray(json.data) ? json.data : [];
-      this.state.questions = list;
+      this.state.questions = list.map(q => ({ ...q, answered: false }));
       this.state.index = 0;
       this.state.done = 0;
       this.state.correct = 0;
@@ -250,6 +251,8 @@ class MemoryEngine {
 
     const q = this.state.questions[this.state.index];
     if (!q) return;
+    if (q.answered) return;
+    if (this.state.isSubmitting) return;
 
     const chosen = this.ui.readChosenAnswer();
     if (chosen === null || Number.isNaN(chosen)) {
@@ -258,6 +261,9 @@ class MemoryEngine {
     }
     const options = this._parseOptions(q.options);
     const chosenText = options[chosen] || '';
+
+    this.state.isSubmitting = true;
+    this.ui.setSubmittingState({ submitting: true, loadingText: '判定中...' });
 
     try {
       // 呼叫後端 submitAnswer
@@ -271,22 +277,28 @@ class MemoryEngine {
 
       const { json, url } = await this.api.get(params);
 
+      const isDuplicated = !!json.duplicated;
       const isCorrect = !!json.is_correct;
-      this.state.done += 1;
-      if (isCorrect) this.state.correct += 1;
+
+      if (!isDuplicated) {
+        this.state.done += 1;
+        if (isCorrect) this.state.correct += 1;
+      }
 
       this.ui.showResult({
         ok: true,
         is_correct: isCorrect,
         explanation: json.explanation || q.explanation || '',
-        recorded: !!json.recorded,
-        recorded_message: json.recorded_message || json.message || '',
+        recorded: !isDuplicated && !!json.recorded,
+        recorded_message: json.recorded_message || json.message || (isDuplicated ? '重複送出，已忽略' : ''),
         need_remedial: !!json.need_remedial,
         ecs_status: json.ecs_status || 'none',
         ecs_streak: json.ecs_streak,
       });
 
-      this._debug({ action: 'submitAnswer', url, request: params, response: json });
+      q.answered = true;
+
+      this._debug({ action: 'submitAnswer', url, request: params, response: json, duplicated: isDuplicated });
 
       // 更新進度條
       this.ui.setProgress({
@@ -296,7 +308,7 @@ class MemoryEngine {
       });
 
       // ✅ 作答後自動下一題（僅答對時）；答錯需使用者自行點「換一題」
-      if (isCorrect) {
+      if (!isDuplicated && isCorrect) {
         setTimeout(() => {
           this.nextQuestion();
         }, 1000);
@@ -307,6 +319,9 @@ class MemoryEngine {
       this.ui.showResult({ ok:false, msg });
       this._debug({ action: 'submitAnswer', error: String(msg), detail: e });
       this.ui.setApiStatus(`送出失敗（${msg}）`, 'bad');
+    } finally {
+      this.state.isSubmitting = false;
+      this.ui.setSubmittingState({ submitting: false, answered: !!q.answered });
     }
   }
 
