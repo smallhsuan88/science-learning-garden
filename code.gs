@@ -30,6 +30,11 @@ function handleRequest_(e, method) {
       return jsonOk_({ ok: true, message: 'pong', ts: nowStr, ts_taipei: nowStr });
     }
 
+    if (action === 'authTest') {
+      const nowStr = nowTaipeiStr_();
+      return jsonOk_({ ok: true, message: 'auth ok', now_taipei: nowStr });
+    }
+
     if (isProtectedAction_(action)) {
       const auth = requireAuth_(params, e);
       if (!auth.ok) {
@@ -70,47 +75,61 @@ function handleRequest_(e, method) {
       try {
         const nowStr = nowTaipeiStr_();
         const todayStr = todayTaipeiStr_();
+        const requestId = params.request_id || Utilities.getUuid();
 
-        // 找題目
         const q = getQuestionById_(q_id);
-        if (!q) return buildCorsResponse_({ ok: false, message: 'question not found: ' + q_id, error_code: 'QUESTION_NOT_FOUND' }, 404);
+        if (!q) return buildCorsResponse_({ ok: false, message: 'question not found: ' + q_id, error_code: 'QUESTION_NOT_FOUND', now_taipei: nowStr }, 404);
 
         const ansRaw = q.answer_key;
         const answer_key_norm = Number(String(ansRaw).trim());
         if (!Number.isFinite(answer_key_norm)) {
-          return buildCorsResponse_({ ok: false, message: 'bad answer_key', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX' }, 400);
+          return buildCorsResponse_({ ok: false, message: 'bad answer_key', error_code: 'BAD_ANSWER_KEY_OR_CHOSEN_INDEX', now_taipei: nowStr }, 400);
         }
 
         const ci = Number(chosen_index_norm);
         const ak = Number(answer_key_norm);
         const isCorrect = (ci === ak);
+        const explanation = q.explanation || '';
 
-        const duplicate = findRecentDuplicateLog_(user_id, q_id, 10);
-        if (duplicate) {
+        const dupCheck = markDuplicateKey_(user_id, q_id, ci, 2, nowStr);
+        if (dupCheck.duplicated) {
           return buildCorsResponse_({
             ok: true,
-            duplicated: true,
-            q_id,
             is_correct: isCorrect,
+            explanation,
+            duplicated: true,
+            recorded: false,
+            write_deferred: false,
+            request_id: requestId,
             now_taipei: nowStr,
-            explanation: q.explanation || '',
+            q_id,
             chosen_index_norm,
             answer_key_norm,
-            debug: {
-              duplicate_ts: duplicate.ts_taipei,
-              q_id,
-            },
+            debug: { duplicate_ts: dupCheck.previous_ts, q_id },
           });
         }
 
-        // 預先計算 Mastery（實際寫入放在 ECS 之後）
-        const masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
-        const mastery = masteryPlan.summary;
+        const responsePayload = {
+          ok: true,
+          is_correct: isCorrect,
+          explanation,
+          duplicated: false,
+          recorded: false,
+          write_deferred: true,
+          request_id: requestId,
+          now_taipei: nowStr,
+          q_id,
+          chosen_index_norm,
+          answer_key_norm,
+        };
 
-        // 寫入 Logs（使用正規化後的 chosen_index）
-        let logOk = { ok: false };
+        let masteryPlan = null;
         try {
-          logOk = appendLog_({
+          masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
+        } catch (masteryPlanErr) { }
+
+        try {
+          const logOk = appendLog_({
             timestamp: nowStr,
             ts_taipei: nowStr,
             user_id,
@@ -121,25 +140,23 @@ function handleRequest_(e, method) {
             chosen_answer: ci,
             answer_key: ak,
             is_correct: isCorrect,
-            strength_before: mastery.strength_before,
-            strength_after: mastery.strength_after,
-            next_review_at: mastery.next_review_at,
+            strength_before: masteryPlan && masteryPlan.summary ? masteryPlan.summary.strength_before : '',
+            strength_after: masteryPlan && masteryPlan.summary ? masteryPlan.summary.strength_after : '',
+            next_review_at: masteryPlan && masteryPlan.summary ? masteryPlan.summary.next_review_at : '',
             client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
             user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
           });
-        } catch (logErr) {
-          logOk = { ok: false, message: String(logErr && logErr.message ? logErr.message : logErr) };
-        }
+          if (logOk && logOk.ok) {
+            responsePayload.recorded = true;
+          }
+        } catch (logErr) { }
 
-        let ecsStatus = 'none';
-        let ecsStreak = null;
+        try {
+          if (!isCorrect) {
+            try {
+              mistakesUpsertOnWrong(user_id, q_id, todayStr);
+            } catch (mistakeErr) { }
 
-        if (!isCorrect) {
-          try {
-            mistakesUpsertOnWrong(user_id, q_id, todayStr);
-          } catch (mistakeErr) {}
-
-          try {
             const options = normalizeOptionsList_(q.options);
             const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
               ? String(params.chosen_text)
@@ -149,58 +166,30 @@ function handleRequest_(e, method) {
               q_id,
               ci,
               chosenText,
-              q.explanation || '',
+              explanation,
               nowStr,
               {
                 knowledge_tag: q.unit || '',
-                remedial_card_text: q.explanation || '',
+                remedial_card_text: explanation,
                 remedial_asset_url: '',
                 importance_weight: 1,
               }
             );
-            ecsStatus = 'active';
-          } catch (ecsErr) {}
-        } else {
-          try {
-            const ecsUpdate = ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
-            if (ecsUpdate && ecsUpdate.status) {
-              ecsStatus = ecsUpdate.status;
-            }
-            if (ecsUpdate && ecsUpdate.streak !== undefined) {
-              ecsStreak = ecsUpdate.streak;
-            }
-          } catch (ecsCorrectErr) {}
-        }
+          } else {
+            ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
+          }
+        } catch (ecsErr) { }
 
-        // 更新 Mastery（ECS 處理完成後才寫入）
         try {
-          masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
-        } catch (masteryErr) {}
+          if (masteryPlan) {
+            masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
+          }
+        } catch (masteryErr) { }
 
-        return buildCorsResponse_({
-          ok: true,
-          q_id,
-          recorded: !!(logOk && logOk.ok !== false),
-          recorded_message: logOk && logOk.message ? logOk.message : undefined,
-          is_correct: isCorrect,
-          now_taipei: nowStr,
-          explanation: q.explanation || '',
-          ecs_status: ecsStatus,
-          ecs_streak: ecsStreak,
-          need_remedial: !isCorrect && mastery.strength_before >= 4,
-          chosen_index_norm,
-          answer_key_norm,
-          debug: {
-            chosen: ci,
-            ans: ak,
-            chosen_raw: chosenRaw,
-            ans_raw: ansRaw,
-            q_id,
-          },
-        });
+        return buildCorsResponse_(responsePayload);
       } catch (err) {
         const msg = String(err && err.message ? err.message : err);
-        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR' }, 500);
+        return buildCorsResponse_({ ok: false, message: msg, error_code: 'SERVER_ERROR', now_taipei: nowTaipeiStr_() }, 500);
       }
     }
 
@@ -242,23 +231,43 @@ function handleRequest_(e, method) {
     if (action === 'getEcsQueue') {
       const user_id = String(params.user_id || 'u001').trim();
       const limit = Number(params.limit || 30);
-      const queue = ecsGetQueue(user_id, limit);
-      const qIds = Array.isArray(queue.q_ids) ? queue.q_ids : [];
-      const questionsById = new Map(getQuestionsAll_().map(q => [q.question_id, q]));
-      const questions = [];
-      qIds.forEach(id => {
-        const q = questionsById.get(id);
-        if (q) questions.push(q);
-      });
-      const meta = queue.meta || {};
-      if (meta.total_active === undefined) meta.total_active = questions.length;
-      if (!meta.now_taipei) meta.now_taipei = nowTaipeiStr_();
-      meta.limit = meta.limit || limit;
-      return jsonOk_({
-        ok: true,
-        data: questions,
-        meta,
-      });
+      if (typeof ecsGetQueue !== 'function') {
+        return jsonOk_({ ok: false, message: 'not implemented' });
+      }
+      try {
+        const queue = ecsGetQueue(user_id, limit);
+        const qIds = Array.isArray(queue.q_ids) ? queue.q_ids : [];
+        const questionsById = new Map(getQuestionsAll_().map(q => [q.question_id, q]));
+        const questions = [];
+        qIds.forEach(id => {
+          const q = questionsById.get(id);
+          if (q) questions.push(q);
+        });
+        const meta = queue.meta || {};
+        if (meta.total_active === undefined) meta.total_active = questions.length;
+        if (!meta.now_taipei) meta.now_taipei = nowTaipeiStr_();
+        meta.limit = meta.limit || limit;
+        return jsonOk_({
+          ok: true,
+          data: questions,
+          meta,
+        });
+      } catch (ecsQueueErr) {
+        return jsonOk_({ ok: false, message: 'not implemented' });
+      }
+    }
+
+    if (action === 'getMasterySummary') {
+      if (typeof getMasterySummary_ !== 'function') {
+        return jsonOk_({ ok: false, message: 'not implemented', now_taipei: nowTaipeiStr_() });
+      }
+      try {
+        const user_id = String(params.user_id || '').trim();
+        const summary = getMasterySummary_(user_id);
+        return jsonOk_(summary);
+      } catch (masterySummaryErr) {
+        return jsonOk_({ ok: false, message: 'not implemented', now_taipei: nowTaipeiStr_() });
+      }
     }
 
     if (action === 'debugAnswerKey') {
@@ -352,6 +361,20 @@ function normalizeOptionsList_(optionsStr) {
   return s.split(',').map(x => x.trim()).filter(Boolean);
 }
 
+function markDuplicateKey_(userId, qId, chosenIndex, secondsWindow, nowStr) {
+  const cache = CacheService.getScriptCache();
+  const key = ['dup', userId || '', qId || '', String(chosenIndex)].join(':');
+  const cached = cache.get(key);
+  if (cached) {
+    return { duplicated: true, previous_ts: cached };
+  }
+  const ts = nowStr || nowTaipeiStr_();
+  try {
+    cache.put(key, ts, Math.max(1, Number(secondsWindow || 2)));
+  } catch (err) { }
+  return { duplicated: false, previous_ts: null };
+}
+
 function debugAnswerKey_(qId) {
   const spreadsheetId = getSpreadsheetIdFromProps_();
   if (!spreadsheetId) {
@@ -404,4 +427,19 @@ function debugAnswerKey_(qId) {
   result.explanation_raw = getVal(foundRow, 'explanation');
 
   return result;
+}
+
+function test_submitAnswer_shape_() {
+  const sample = {
+    ok: true,
+    is_correct: false,
+    explanation: '這是詳解範例',
+    duplicated: false,
+    recorded: false,
+    write_deferred: true,
+    request_id: Utilities.getUuid(),
+    now_taipei: nowTaipeiStr_(),
+  };
+  Logger.log(sample);
+  return sample;
 }
