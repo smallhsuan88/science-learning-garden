@@ -74,7 +74,6 @@ function handleRequest_(e, method) {
 
       try {
         const nowStr = nowTaipeiStr_();
-        const todayStr = todayTaipeiStr_();
         const requestId = params.request_id || Utilities.getUuid();
 
         const q = getQuestionById_(q_id);
@@ -123,68 +122,50 @@ function handleRequest_(e, method) {
           answer_key_norm,
         };
 
-        let masteryPlan = null;
-        try {
-          masteryPlan = masteryComputeUpdate_(user_id, q, chosen_index_norm, isCorrect);
-        } catch (masteryPlanErr) { }
+        const clientTs = params.client_ts || '';
+        const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
+          ? String(params.chosen_text)
+          : (normalizeOptionsList_(q.options)[ci] || '');
+        const queueId = Utilities.getUuid();
+        const idempotencyKey = clientTs
+          ? [user_id, q_id, ci, clientTs].join(':')
+          : [user_id, q_id, ci, nowStr].join(':');
+        const queuePayload = {
+          queue_id: queueId,
+          status: 'queued',
+          attempt: 0,
+          created_at: nowStr,
+          updated_at: nowStr,
+          next_retry_at: '',
+          request_id: requestId,
+          idempotency_key: idempotencyKey,
+          user_id,
+          q_id,
+          grade: q.grade,
+          unit: q.unit,
+          difficulty: q.difficulty,
+          chosen_index: ci,
+          chosen_text: chosenText,
+          answer_key: ak,
+          is_correct: isCorrect,
+          explanation,
+          client_ts: clientTs,
+          server_ts: nowStr,
+          mode: params.mode || '',
+        };
+        queuePayload.payload_json = JSON.stringify(queuePayload);
 
+        let queueResult = { enqueued: false, duplicated: false, queue_id: queueId };
         try {
-          const logOk = appendLog_({
-            timestamp: nowStr,
-            ts_taipei: nowStr,
-            user_id,
-            q_id,
-            grade: q.grade,
-            unit: q.unit,
-            difficulty: q.difficulty,
-            chosen_answer: ci,
-            answer_key: ak,
-            is_correct: isCorrect,
-            strength_before: masteryPlan && masteryPlan.summary ? masteryPlan.summary.strength_before : '',
-            strength_after: masteryPlan && masteryPlan.summary ? masteryPlan.summary.strength_after : '',
-            next_review_at: masteryPlan && masteryPlan.summary ? masteryPlan.summary.next_review_at : '',
-            client_ip: (e && e.headers && e.headers['X-Forwarded-For']) ? e.headers['X-Forwarded-For'] : '',
-            user_agent: (e && e.headers && e.headers['User-Agent']) ? e.headers['User-Agent'] : '',
-          });
-          if (logOk && logOk.ok) {
-            responsePayload.recorded = true;
-          }
-        } catch (logErr) { }
+          queueResult = enqueueWriteQueue_(queuePayload) || queueResult;
+        } catch (queueErr) {
+        }
 
-        try {
-          if (!isCorrect) {
-            try {
-              mistakesUpsertOnWrong(user_id, q_id, todayStr);
-            } catch (mistakeErr) { }
-
-            const options = normalizeOptionsList_(q.options);
-            const chosenText = (typeof params.chosen_text !== 'undefined' && params.chosen_text !== null)
-              ? String(params.chosen_text)
-              : (options[ci] || '');
-            ecsUpsertOnWrong(
-              user_id,
-              q_id,
-              ci,
-              chosenText,
-              explanation,
-              nowStr,
-              {
-                knowledge_tag: q.unit || '',
-                remedial_card_text: explanation,
-                remedial_asset_url: '',
-                importance_weight: 1,
-              }
-            );
-          } else {
-            ecsUpdateOnCorrect(user_id, q_id, nowStr, todayStr);
-          }
-        } catch (ecsErr) { }
-
-        try {
-          if (masteryPlan) {
-            masteryApplyUpdate_(masteryPlan.sheet, masteryPlan.headerMap, masteryPlan.rowObj, masteryPlan.rowIndex);
-          }
-        } catch (masteryErr) { }
+        responsePayload.queue_id = queueResult.queue_id || queueId;
+        responsePayload.write_deferred = true;
+        responsePayload.queued = !!queueResult.enqueued;
+        responsePayload.queue_duplicated = !!queueResult.duplicated;
+        responsePayload.recorded = false;
 
         return buildCorsResponse_(responsePayload);
       } catch (err) {
@@ -442,4 +423,81 @@ function test_submitAnswer_shape_() {
   };
   Logger.log(sample);
   return sample;
+}
+
+function ensureWriteQueueSheet_() {
+  const spreadsheetId = getSpreadsheetIdFromProps_();
+  if (!spreadsheetId) {
+    throw new Error('Script Properties 缺少 SPREADSHEET_ID');
+  }
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  let sheet = ss.getSheetByName('WriteQueue');
+  if (!sheet) {
+    sheet = ss.insertSheet('WriteQueue');
+    const header = [
+      'queue_id',
+      'status',
+      'attempt',
+      'created_at',
+      'updated_at',
+      'next_retry_at',
+      'request_id',
+      'idempotency_key',
+      'payload_json',
+    ];
+    sheet.getRange(1, 1, 1, header.length).setValues([header]);
+  }
+  const headerMap = getWriteQueueHeaderMap_(sheet);
+  return { sheet, headerMap };
+}
+
+function getWriteQueueHeaderMap_(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const map = {};
+  headers.forEach((h, idx) => {
+    const key = String(h || '').trim();
+    if (key) map[key] = idx + 1;
+  });
+  return map;
+}
+
+function getTaipeiMs_() {
+  return Date.now();
+}
+
+function enqueueWriteQueue_(payload) {
+  const { sheet, headerMap } = ensureWriteQueueSheet_();
+  const lastRow = sheet.getLastRow();
+  const colIdempotency = headerMap['idempotency_key'];
+  const colQueueId = headerMap['queue_id'];
+  if (colIdempotency) {
+    const maxRows = 500;
+    const startRow = Math.max(2, lastRow - maxRows + 1);
+    const rowCount = lastRow >= startRow ? (lastRow - startRow + 1) : 0;
+    if (rowCount > 0) {
+      const range = sheet.getRange(startRow, 1, rowCount, sheet.getLastColumn());
+      const values = range.getValues();
+      for (let i = 0; i < values.length; i++) {
+        const row = values[i];
+        const rowIdemp = String(row[colIdempotency - 1] || '').trim();
+        if (rowIdemp && rowIdemp === String(payload.idempotency_key || '').trim()) {
+          const existingQueueId = colQueueId ? row[colQueueId - 1] : '';
+          return { enqueued: false, duplicated: true, queue_id: existingQueueId || payload.queue_id };
+        }
+      }
+    }
+  }
+
+  const payloadJson = payload.payload_json || JSON.stringify(payload);
+  const data = new Array(sheet.getLastColumn() || Object.keys(headerMap).length || 1).fill('');
+  Object.keys(headerMap).forEach(key => {
+    const colIdx = headerMap[key] - 1;
+    if (key === 'payload_json') {
+      data[colIdx] = payloadJson;
+    } else if (payload.hasOwnProperty(key)) {
+      data[colIdx] = payload[key];
+    }
+  });
+  sheet.appendRow(data);
+  return { enqueued: true, duplicated: false, queue_id: payload.queue_id };
 }
