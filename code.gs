@@ -127,7 +127,9 @@ function handleRequest_(e, method) {
           ? String(params.chosen_text)
           : (normalizeOptionsList_(q.options)[ci] || '');
         const queueId = Utilities.getUuid();
-        const idempotencyKey = ['req', requestId, user_id, q_id, ci].join(':');
+        const idempotencyKey = clientTs
+          ? ['ans', user_id, q_id, ci, String(clientTs)].join(':')
+          : ['ans', user_id, q_id, ci, Math.floor(Date.now() / 2000)].join(':');
         const queuePayload = {
           queue_id: queueId,
           status: 'queued',
@@ -163,6 +165,7 @@ function handleRequest_(e, method) {
         responsePayload.write_deferred = true;
         responsePayload.queued = !!queueResult.enqueued;
         responsePayload.queue_duplicated = !!queueResult.duplicated;
+        if (queueResult.lock_failed) responsePayload.lock_failed = true;
         responsePayload.recorded = false;
 
         return buildCorsResponse_(responsePayload);
@@ -496,13 +499,15 @@ function enqueueWriteQueue_(payload) {
       const rowCount = lastRow >= startRow ? (lastRow - startRow + 1) : 0;
       if (rowCount > 0) {
         const idempotencyValues = sheet.getRange(startRow, colIdempotency, rowCount, 1).getValues();
-        const queueIdValues = colQueueId ? sheet.getRange(startRow, colQueueId, rowCount, 1).getValues() : [];
+        const queueIdValues = colQueueId ? sheet.getRange(startRow, colQueueId, rowCount, 1).getValues() : null;
         for (let i = 0; i < rowCount; i++) {
           const rowIdemp = String(idempotencyValues[i][0] || '').trim();
           if (rowIdemp && rowIdemp === idempotencyKey) {
-            const existingQueueId = queueIdValues ? queueIdValues[i][0] : '';
+            const existingQueueId = queueIdValues ? (queueIdValues[i][0] || '') : '';
             if (cacheKey) {
-              try { cache.put(cacheKey, existingQueueId || payload.queue_id, cacheTtl); } catch (err) { }
+              if (existingQueueId) {
+                try { cache.put(cacheKey, existingQueueId, cacheTtl); } catch (err) { }
+              }
             }
             return { enqueued: false, duplicated: true, queue_id: existingQueueId || payload.queue_id };
           }
