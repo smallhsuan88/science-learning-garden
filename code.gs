@@ -469,14 +469,13 @@ function enqueueWriteQueue_(payload) {
   const lock = LockService.getScriptLock();
   const idempotencyKey = String(payload.idempotency_key || '').trim();
   const cacheKey = idempotencyKey ? 'wq:' + idempotencyKey : '';
-  const cacheTtl = 60 * 30;
+  const cacheTtl = 60 * 60 * 6;
 
   if (cacheKey) {
     const cachedQueueId = cache.get(cacheKey);
     if (cachedQueueId) {
       return { enqueued: false, duplicated: true, queue_id: cachedQueueId || payload.queue_id };
     }
-    try { cache.put(cacheKey, payload.queue_id, cacheTtl); } catch (err) { }
   }
 
   let lockAcquired = false;
@@ -497,14 +496,14 @@ function enqueueWriteQueue_(payload) {
       const rowCount = lastRow >= startRow ? (lastRow - startRow + 1) : 0;
       if (rowCount > 0) {
         const idempotencyValues = sheet.getRange(startRow, colIdempotency, rowCount, 1).getValues();
-        let queueIdValues = null;
-        if (colQueueId) {
-          queueIdValues = sheet.getRange(startRow, colQueueId, rowCount, 1).getValues();
-        }
+        const queueIdValues = colQueueId ? sheet.getRange(startRow, colQueueId, rowCount, 1).getValues() : [];
         for (let i = 0; i < rowCount; i++) {
           const rowIdemp = String(idempotencyValues[i][0] || '').trim();
           if (rowIdemp && rowIdemp === idempotencyKey) {
             const existingQueueId = queueIdValues ? queueIdValues[i][0] : '';
+            if (cacheKey) {
+              try { cache.put(cacheKey, existingQueueId || payload.queue_id, cacheTtl); } catch (err) { }
+            }
             return { enqueued: false, duplicated: true, queue_id: existingQueueId || payload.queue_id };
           }
         }
