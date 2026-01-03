@@ -127,9 +127,7 @@ function handleRequest_(e, method) {
           ? String(params.chosen_text)
           : (normalizeOptionsList_(q.options)[ci] || '');
         const queueId = Utilities.getUuid();
-        const idempotencyKey = clientTs
-          ? [user_id, q_id, ci, clientTs].join(':')
-          : [user_id, q_id, ci, nowStr].join(':');
+        const idempotencyKey = ['req', requestId, user_id, q_id, ci].join(':');
         const queuePayload = {
           queue_id: queueId,
           status: 'queued',
@@ -467,37 +465,71 @@ function getTaipeiMs_() {
 
 function enqueueWriteQueue_(payload) {
   const { sheet, headerMap } = ensureWriteQueueSheet_();
-  const lastRow = sheet.getLastRow();
-  const colIdempotency = headerMap['idempotency_key'];
-  const colQueueId = headerMap['queue_id'];
-  if (colIdempotency) {
-    const maxRows = 500;
-    const startRow = Math.max(2, lastRow - maxRows + 1);
-    const rowCount = lastRow >= startRow ? (lastRow - startRow + 1) : 0;
-    if (rowCount > 0) {
-      const range = sheet.getRange(startRow, 1, rowCount, sheet.getLastColumn());
-      const values = range.getValues();
-      for (let i = 0; i < values.length; i++) {
-        const row = values[i];
-        const rowIdemp = String(row[colIdempotency - 1] || '').trim();
-        if (rowIdemp && rowIdemp === String(payload.idempotency_key || '').trim()) {
-          const existingQueueId = colQueueId ? row[colQueueId - 1] : '';
-          return { enqueued: false, duplicated: true, queue_id: existingQueueId || payload.queue_id };
+  const cache = CacheService.getScriptCache();
+  const lock = LockService.getScriptLock();
+  const idempotencyKey = String(payload.idempotency_key || '').trim();
+  const cacheKey = idempotencyKey ? 'wq:' + idempotencyKey : '';
+  const cacheTtl = 60 * 30;
+
+  if (cacheKey) {
+    const cachedQueueId = cache.get(cacheKey);
+    if (cachedQueueId) {
+      return { enqueued: false, duplicated: true, queue_id: cachedQueueId || payload.queue_id };
+    }
+    try { cache.put(cacheKey, payload.queue_id, cacheTtl); } catch (err) { }
+  }
+
+  let lockAcquired = false;
+  try {
+    try {
+      lock.waitLock(2000);
+      lockAcquired = true;
+    } catch (lockErr) {
+      return { enqueued: false, duplicated: false, queue_id: payload.queue_id, lock_failed: true };
+    }
+
+    const lastRow = sheet.getLastRow();
+    const colIdempotency = headerMap['idempotency_key'];
+    const colQueueId = headerMap['queue_id'];
+    if (colIdempotency) {
+      const maxRows = 500;
+      const startRow = Math.max(2, lastRow - maxRows + 1);
+      const rowCount = lastRow >= startRow ? (lastRow - startRow + 1) : 0;
+      if (rowCount > 0) {
+        const idempotencyValues = sheet.getRange(startRow, colIdempotency, rowCount, 1).getValues();
+        let queueIdValues = null;
+        if (colQueueId) {
+          queueIdValues = sheet.getRange(startRow, colQueueId, rowCount, 1).getValues();
+        }
+        for (let i = 0; i < rowCount; i++) {
+          const rowIdemp = String(idempotencyValues[i][0] || '').trim();
+          if (rowIdemp && rowIdemp === idempotencyKey) {
+            const existingQueueId = queueIdValues ? queueIdValues[i][0] : '';
+            return { enqueued: false, duplicated: true, queue_id: existingQueueId || payload.queue_id };
+          }
         }
       }
     }
-  }
 
-  const payloadJson = payload.payload_json || JSON.stringify(payload);
-  const data = new Array(sheet.getLastColumn() || Object.keys(headerMap).length || 1).fill('');
-  Object.keys(headerMap).forEach(key => {
-    const colIdx = headerMap[key] - 1;
-    if (key === 'payload_json') {
-      data[colIdx] = payloadJson;
-    } else if (payload.hasOwnProperty(key)) {
-      data[colIdx] = payload[key];
+    const payloadJson = payload.payload_json || JSON.stringify(payload);
+    const data = new Array(sheet.getLastColumn() || Object.keys(headerMap).length || 1).fill('');
+    Object.keys(headerMap).forEach(key => {
+      const colIdx = headerMap[key] - 1;
+      if (key === 'payload_json') {
+        data[colIdx] = payloadJson;
+      } else if (payload.hasOwnProperty(key)) {
+        data[colIdx] = payload[key];
+      }
+    });
+    sheet.appendRow(data);
+
+    if (cacheKey) {
+      try { cache.put(cacheKey, payload.queue_id, cacheTtl); } catch (err) { }
     }
-  });
-  sheet.appendRow(data);
-  return { enqueued: true, duplicated: false, queue_id: payload.queue_id };
+    return { enqueued: true, duplicated: false, queue_id: payload.queue_id };
+  } finally {
+    if (lockAcquired) {
+      try { lock.releaseLock(); } catch (releaseErr) { }
+    }
+  }
 }
